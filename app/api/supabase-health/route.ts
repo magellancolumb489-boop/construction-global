@@ -6,7 +6,9 @@ import { createClient } from "@/lib/supabase/server"
 export async function GET() {
   const checks: Record<string, unknown> = {
     envUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-    envKey: !!process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY,
+    envKey:
+      !!process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY ||
+      !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   }
 
   try {

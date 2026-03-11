@@ -20,12 +20,21 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-
-  const initialUser = user
-    ? { email: user.email ?? "", displayName: user.user_metadata?.display_name ?? "" }
-    : null
+  // Resilient auth: if Supabase fails (missing env, network, etc.), app still loads with null user
+  let initialUser: { email: string; displayName: string } | null = null
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      initialUser = {
+        email: user.email ?? "",
+        displayName: user.user_metadata?.display_name ?? "",
+      }
+    }
+  } catch (err) {
+    // Log for Vercel Function logs; app continues without auth
+    console.error("[RootLayout] Supabase auth failed:", err instanceof Error ? err.message : err)
+  }
 
   return (
     <html lang="ro">
