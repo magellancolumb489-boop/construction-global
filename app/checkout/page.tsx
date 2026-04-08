@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,11 +34,31 @@ export default function CheckoutPage() {
     notes: "",
   });
 
+  const didPrefillFromCart = useRef(false);
+
   useEffect(() => {
     if (items.length === 0) {
       router.replace("/cart");
     }
   }, [items.length, router]);
+
+  // Prefill livrare / firmă from configurare comandă (metadata pe linia din coș)
+  useEffect(() => {
+    if (didPrefillFromCart.current || items.length === 0) return;
+    const d = items.find((i) => i.configureDelivery)?.configureDelivery;
+    if (!d) return;
+    didPrefillFromCart.current = true;
+    setForm((f) => ({
+      ...f,
+      addressLine1: d.addressLine1 || f.addressLine1,
+      city: d.city || f.city,
+      county: d.county || f.county,
+      country: d.country || f.country,
+      companyName: d.companyName ?? f.companyName,
+      vatNumber: d.vatNumber ?? f.vatNumber,
+    }));
+    if (d.isCompany) setIsCompany(true);
+  }, [items]);
 
   function update(field: string, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));

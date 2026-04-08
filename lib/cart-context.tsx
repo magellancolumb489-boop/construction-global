@@ -82,7 +82,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const totalItems = items.reduce((acc, i) => acc + i.qty, 0)
-  const totalPrice = items.reduce((acc, i) => acc + i.price * i.qty, 0)
+  const totalPrice = items.reduce(
+    (acc, i) => acc + i.price * i.qty + (i.transportFee ?? 0),
+    0,
+  )
 
   return (
     <CartContext.Provider

@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { CartProvider } from "@/lib/cart-context"
+import { Toaster } from "@/components/ui/toaster"
 import { SiteHeader } from "@/components/layout/header"
 import { SiteFooter } from "@/components/layout/footer"
 import { createClient } from "@/lib/supabase/server"
@@ -45,6 +46,7 @@ export default async function RootLayout({
             <main className="flex-1">{children}</main>
             <SiteFooter />
           </div>
+          <Toaster />
         </CartProvider>
         <Analytics />
       </body>

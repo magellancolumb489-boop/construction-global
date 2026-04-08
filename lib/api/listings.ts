@@ -1,6 +1,12 @@
 import { createClient } from "@/lib/supabase/server"
 import type { Tables } from "@/types/supabase"
-import type { ProductListItem, ProductDetail, Currency, ProductUnit } from "@/types/domain"
+import type {
+  ProductListItem,
+  ProductDetail,
+  Currency,
+  ProductUnit,
+  ListingKind,
+} from "@/types/domain"
 
 export type Listing = Tables<"marketplace_listings">
 export type ListingImage = Tables<"marketplace_listing_images">
@@ -29,6 +35,15 @@ function storagePublicUrl(path: string): string {
 
 const PLACEHOLDER_IMG = "https://images.unsplash.com/photo-1590069261209-f8e9b8642343?w=400&h=300&fit=crop"
 
+/** Normalise DB listing_type to the domain enum. */
+function listingKindFromRow(listing: Listing): ListingKind {
+  const t = listing.listing_type
+  if (t === "concrete" || t === "materials" || t === "equipment" || t === "services") {
+    return t
+  }
+  return "materials"
+}
+
 // Map a DB listing row to the presentation ProductListItem shape
 export function toProductListItem(
   listing: Listing,
@@ -45,22 +60,37 @@ export function toProductListItem(
     availableQty: listing.available_qty,
     thumbnailUrl: firstImagePath ? storagePublicUrl(firstImagePath) : PLACEHOLDER_IMG,
     category: categoryName ?? "",
+    listingKind: listingKindFromRow(listing),
   }
 }
 
 // Map a DB listing with images to the presentation ProductDetail shape
 export function toProductDetail(
   listing: ListingWithImages,
-  categoryName?: string
+  categoryName?: string,
+  seller?: { display_name: string | null; phone: string | null } | null
 ): ProductDetail {
   const images = listing.marketplace_listing_images
     .sort((a, b) => a.display_order - b.display_order)
     .map((img) => storagePublicUrl(img.storage_path))
 
+  const kind = listingKindFromRow(listing)
   return {
     ...toProductListItem(listing, categoryName, listing.marketplace_listing_images[0]?.storage_path),
+    listingKind: kind,
     description: listing.description ?? "",
     images: images.length > 0 ? images : [PLACEHOLDER_IMG],
+    sellerId: listing.seller_id,
+    categoryId: listing.category_id ?? null,
+    location: listing.location ?? null,
+    sellerDisplayName: seller?.display_name?.trim() || null,
+    sellerPhone: seller?.phone?.trim() || null,
+    transportFee: listing.transport_fee ?? null,
+    minOrderQty: listing.min_order_qty ?? null,
+    pickupLat: listing.pickup_lat ?? null,
+    pickupLng: listing.pickup_lng ?? null,
+    transportModes: listing.transport_modes ?? null,
+    serviceArea: listing.service_area ?? null,
   }
 }
 
@@ -268,7 +298,9 @@ export async function getProductDetailFromListing(slug: string): Promise<Product
 
   const { data, error } = await supabase
     .from("marketplace_listings")
-    .select("*, marketplace_listing_images(*), categories(name)")
+    .select(
+      "*, marketplace_listing_images(*), categories(name), profiles(display_name, phone)"
+    )
     .eq("slug", slug)
     .eq("is_active", true)
     .single()
@@ -279,6 +311,27 @@ export async function getProductDetailFromListing(slug: string): Promise<Product
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const catName = (data as any).categories?.name ?? ""
-  return toProductDetail(data as ListingWithImages, catName)
+  const row = data as any
+  const catName = row.categories?.name ?? ""
+  const prof = row.profiles as
+    | { display_name: string | null; phone: string | null }
+    | { display_name: string | null; phone: string | null }[]
+    | null
+  let seller = Array.isArray(prof) ? prof[0] ?? null : prof
+  // Embed can be null (RLS) or return blank display_name; direct read often still works for public marketplace
+  const sellerId = row.seller_id as string
+  if (!seller?.display_name?.trim()) {
+    const { data: profRow, error: profErr } = await supabase
+      .from("profiles")
+      .select("display_name, phone")
+      .eq("id", sellerId)
+      .maybeSingle()
+    if (!profErr && profRow) {
+      seller = {
+        display_name: profRow.display_name,
+        phone: profRow.phone,
+      }
+    }
+  }
+  return toProductDetail(row as ListingWithImages, catName, seller)
 }

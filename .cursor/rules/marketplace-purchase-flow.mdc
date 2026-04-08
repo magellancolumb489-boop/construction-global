@@ -1,0 +1,33 @@
+---
+description: Marketplace purchase flow integration rules
+globs:
+  - "app/marketplace/**"
+  - "app/cart/**"
+  - "app/checkout/**"
+  - "app/products/**"
+  - "lib/cart-context.tsx"
+  - "components/shared/calc-price.tsx"
+  - "components/shared/product-card.tsx"
+alwaysApply: false
+---
+
+# Marketplace purchase flow
+
+When changing how users discover, configure, cart, or pay for marketplace products:
+
+## Read first (this repo)
+
+- **Product detail:** `app/products/[slug]/page.tsx`, `app/products/[slug]/product-detail-client.tsx`
+- **Cart:** `app/cart/page.tsx`, `lib/cart-context.tsx`
+- **Add to cart:** `components/shared/product-card.tsx`; calculator-driven flow in `components/shared/calc-price.tsx` where it applies
+- **Checkout:** `app/checkout/page.tsx` (and `app/checkout/success`, `app/checkout/cancelled` if post-purchase UX changes)
+- **Browse:** `app/marketplace/page.tsx` when listing or navigation to products changes
+
+## Practices
+
+- Reuse existing pages, routing, cart logic, and UI patterns; prefer **small, coherent edits** over re-architecture.
+- **Do not change business calculator formulas** (pricing, minimum order, transport, validation math, etc.) in `calc-price.tsx` unless the user explicitly asks; wiring and UI may change if behavior stays equivalent.
+- Avoid unnecessary **npm** installs; use what the project already depends on.
+- **Romanian copy:** keep domain wording natural and consistent with surrounding strings (e.g. labels like “Cos”, “Finalizare comanda”); URLs may stay as today (`/cart`, `/checkout`) unless the user requests slug changes.
+- **Calculator-backed products:** prefer the journey **product page → configurare comandă → coșul meu / review** (configure order, then cart or review), aligned with existing routes and components.
+- Before **large** edits, briefly list which files you expect to touch and why.

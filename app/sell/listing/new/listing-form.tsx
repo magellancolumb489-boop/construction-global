@@ -1,49 +1,47 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import Image from "next/image"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Loader2, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import {
-  createListing, updateListing, deleteListing,
-  uploadListingImage, deleteListingImage, checkSlugAvailable,
-  getImagePublicUrl,
+  createListing,
+  updateListing,
+  deleteListing,
+  uploadListingImage,
+  deleteListingImage,
+  checkSlugAvailable,
   type Listing,
+  type ListingInsert,
+  type ListingUpdate,
 } from "@/lib/api/listings-client"
 import { createClient } from "@/lib/supabase/client"
-import { Loader2, Upload, X, Trash2 } from "lucide-react"
-
-const UNITS = [
-  { value: "TON", label: "Tone (TON)" },
-  { value: "KG", label: "Kilograme (KG)" },
-  { value: "M3", label: "Metri cubi (M3)" },
-  { value: "BUC", label: "Bucati (BUC)" },
-  { value: "ML", label: "Metri liniari (ML)" },
-]
-
-const CURRENCIES = [
-  { value: "RON", label: "RON" },
-  { value: "EUR", label: "EUR" },
-]
+import { ListingWizardStepper } from "@/components/sell/listing-wizard/listing-wizard-stepper"
+import { WizardStepType } from "@/components/sell/listing-wizard/wizard-step-type"
+import { WizardStepDetailsConcrete } from "@/components/sell/listing-wizard/wizard-step-details-concrete"
+import { WizardStepDetailsMaterials } from "@/components/sell/listing-wizard/wizard-step-details-materials"
+import { WizardStepDetailsEquipment } from "@/components/sell/listing-wizard/wizard-step-details-equipment"
+import { WizardStepDetailsServices } from "@/components/sell/listing-wizard/wizard-step-details-services"
+import { WizardStepImages } from "@/components/sell/listing-wizard/wizard-step-images"
+import { WizardStepReview } from "@/components/sell/listing-wizard/wizard-step-review"
+import {
+  emptyWizardState,
+  wizardStateFromListing,
+  transportModesFromFlags,
+  type WizardFormState,
+} from "@/lib/listing-wizard-form-state"
+import type { ListingWizardType } from "@/lib/listing-wizard-types"
 
 interface CategoryOption {
   id: number
   name: string
 }
 
-// Existing image from DB (edit mode)
 interface ExistingImage {
   id: number
   storage_path: string
@@ -52,7 +50,6 @@ interface ExistingImage {
 
 interface ListingFormProps {
   categories: CategoryOption[]
-  // Edit mode props
   editMode?: boolean
   listing?: Listing
   existingImages?: ExistingImage[]
@@ -68,28 +65,208 @@ function slugify(text: string): string {
     .substring(0, 80)
 }
 
-export function ListingForm({ categories, editMode = false, listing, existingImages = [] }: ListingFormProps) {
+/** True if changing listing type would discard user input (create flow). */
+function hasMeaningfulWizardData(f: WizardFormState): boolean {
+  return Boolean(
+    f.title.trim() ||
+      f.price.trim() ||
+      f.pickupAddress.trim() ||
+      f.description.trim() ||
+      f.availableQty !== "0" ||
+      f.transportFee.trim() ||
+      f.minOrderQty.trim() ||
+      f.serviceArea.trim() ||
+      f.equipmentModel.trim(),
+  )
+}
+
+/** Step-local validation before Continue. */
+function validateStep(step: number, form: WizardFormState): string | null {
+  if (step === 1) {
+    if (!form.listingType) return "Selectati tipul anuntului."
+    return null
+  }
+  if (step === 2 && form.listingType) {
+    return validateDetailsStep(form.listingType, form)
+  }
+  return null
+}
+
+function validateDetailsStep(t: ListingWizardType, f: WizardFormState): string | null {
+  switch (t) {
+    case "concrete": {
+      if (!f.title.trim()) return "Titlul este obligatoriu."
+      if (!f.pickupAddress.trim()) return "Adresa de incarcare este obligatorie."
+      if (f.pickupLat == null || f.pickupLng == null) {
+        return "Geocodati adresa sau introduceti latitudinea si longitudinea."
+      }
+      if (!f.transportCifa && !f.transportPompa && !f.transportVrac) {
+        return "Selectati cel putin un mod de transport (CIFA, POMPĂ sau VRAC)."
+      }
+      if (!f.minOrderQty.trim() || Number(f.minOrderQty) <= 0) {
+        return "Comanda minima trebuie sa fie mai mare ca zero."
+      }
+      if (!f.price.trim() || Number(f.price) < 0) return "Pretul este obligatoriu."
+      if (f.unit !== "M3" && f.unit !== "TON") {
+        return "Pentru beton, unitatea trebuie sa fie M3 sau TON."
+      }
+      if (Number(f.availableQty) < 0) return "Cantitatea disponibila este invalida."
+      return null
+    }
+    case "materials": {
+      if (!f.title.trim()) return "Titlul este obligatoriu."
+      if (!f.price.trim() || Number(f.price) < 0) return "Pretul este obligatoriu."
+      if (!f.availableQty.trim() || Number(f.availableQty) < 0) {
+        return "Cantitatea disponibila este obligatorie."
+      }
+      if (f.transportFee.trim() && Number(f.transportFee) < 0) {
+        return "Costul de transport nu poate fi negativ."
+      }
+      return null
+    }
+    case "equipment": {
+      if (!f.title.trim()) return "Titlul este obligatoriu."
+      if (!f.price.trim() || Number(f.price) < 0) return "Pretul este obligatoriu."
+      if (f.transportFee.trim() && Number(f.transportFee) < 0) {
+        return "Costul de transport nu poate fi negativ."
+      }
+      return null
+    }
+    case "services": {
+      if (!f.title.trim()) return "Titlul este obligatoriu."
+      if (!f.price.trim() || Number(f.price) < 0) return "Tariful este obligatoriu."
+      return null
+    }
+    default:
+      return null
+  }
+}
+
+/** Map wizard state to DB columns for create/update. */
+function toListingPayload(
+  form: WizardFormState,
+  isDraft: boolean,
+): Omit<ListingInsert, "seller_id" | "slug"> {
+  const active = isDraft ? false : form.isActive
+  const lt = form.listingType!
+  const base = {
+    listing_type: lt,
+    title: form.title.trim(),
+    description: form.description.trim() || null,
+    category_id: form.categoryId ? Number(form.categoryId) : null,
+    currency: form.currency,
+    is_active: active,
+  }
+
+  if (lt === "concrete") {
+    const modes = transportModesFromFlags(
+      form.transportCifa,
+      form.transportPompa,
+      form.transportVrac,
+    )
+    const firstLine = form.pickupAddress.split("\n")[0]?.trim() || null
+    return {
+      ...base,
+      price: Number(form.price),
+      unit: form.unit,
+      available_qty: Number(form.availableQty) >= 0 ? Number(form.availableQty) : 0,
+      location: firstLine,
+      pickup_address: form.pickupAddress.trim(),
+      pickup_lat: form.pickupLat,
+      pickup_lng: form.pickupLng,
+      transport_modes: modes.length ? modes : null,
+      min_order_qty: Number(form.minOrderQty),
+      transport_fee: null,
+      service_area: null,
+      equipment_condition: null,
+      equipment_model: null,
+      equipment_year: null,
+    }
+  }
+
+  if (lt === "materials") {
+    return {
+      ...base,
+      price: Number(form.price),
+      unit: form.unit,
+      available_qty: Number(form.availableQty) || 0,
+      location: form.location.trim() || null,
+      pickup_address: null,
+      pickup_lat: null,
+      pickup_lng: null,
+      transport_modes: null,
+      min_order_qty: null,
+      transport_fee: form.transportFee.trim() === "" ? 0 : Number(form.transportFee),
+      service_area: null,
+      equipment_condition: null,
+      equipment_model: null,
+      equipment_year: null,
+    }
+  }
+
+  if (lt === "equipment") {
+    const y = form.equipmentYear.trim()
+    const yearParsed = y ? parseInt(y, 10) : NaN
+    return {
+      ...base,
+      price: Number(form.price),
+      unit: "BUC",
+      available_qty: 1,
+      location: form.location.trim() || null,
+      pickup_address: null,
+      pickup_lat: null,
+      pickup_lng: null,
+      transport_modes: null,
+      min_order_qty: null,
+      transport_fee:
+        form.transportFee.trim() === "" ? null : Number(form.transportFee),
+      service_area: null,
+      equipment_condition: form.equipmentCondition.trim() || null,
+      equipment_model: form.equipmentModel.trim() || null,
+      equipment_year: Number.isFinite(yearParsed) ? yearParsed : null,
+    }
+  }
+
+  // services
+  return {
+    ...base,
+    price: Number(form.price),
+    unit: "BUC",
+    available_qty: 1,
+    location: form.serviceArea.trim() || null,
+    pickup_address: null,
+    pickup_lat: null,
+    pickup_lng: null,
+    transport_modes: null,
+    min_order_qty: null,
+    transport_fee: null,
+    service_area: form.serviceArea.trim() || null,
+    equipment_condition: null,
+    equipment_model: null,
+    equipment_year: null,
+  }
+}
+
+export function ListingForm({
+  categories,
+  editMode = false,
+  listing,
+  existingImages = [],
+}: ListingFormProps) {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [form, setForm] = useState({
-    title: listing?.title ?? "",
-    categoryId: listing?.category_id ? String(listing.category_id) : "",
-    description: listing?.description ?? "",
-    price: listing?.price ? String(listing.price) : "",
-    unit: listing?.unit ?? "TON",
-    currency: listing?.currency ?? "RON",
-    availableQty: listing?.available_qty ? String(listing.available_qty) : "0",
-    location: listing?.location ?? "",
-    isActive: listing?.is_active ?? true,
-  })
+  const [step, setStep] = useState(1)
+  const [form, setForm] = useState<WizardFormState>(() =>
+    editMode && listing ? wizardStateFromListing(listing) : emptyWizardState(),
+  )
 
-  // New files selected by the user (not yet uploaded)
   const [newFiles, setNewFiles] = useState<File[]>([])
   const [newPreviews, setNewPreviews] = useState<string[]>([])
-
-  // Existing images that have been marked for deletion
   const [deletedImageIds, setDeletedImageIds] = useState<Set<number>>(new Set())
+  const [typeChangeOpen, setTypeChangeOpen] = useState(false)
+  const [pendingListingType, setPendingListingType] =
+    useState<ListingWizardType | null>(null)
 
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -97,14 +274,18 @@ export function ListingForm({ categories, editMode = false, listing, existingIma
 
   const remainingExisting = existingImages.filter((img) => !deletedImageIds.has(img.id))
 
+  const clearNewFiles = useCallback(() => {
+    newPreviews.forEach((url) => URL.revokeObjectURL(url))
+    setNewFiles([])
+    setNewPreviews([])
+  }, [newPreviews])
+
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
     if (files.length === 0) return
-
     setNewFiles((prev) => [...prev, ...files])
     const previews = files.map((f) => URL.createObjectURL(f))
     setNewPreviews((prev) => [...prev, ...previews])
-
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
@@ -118,96 +299,119 @@ export function ListingForm({ categories, editMode = false, listing, existingIma
     setDeletedImageIds((prev) => new Set(prev).add(imageId))
   }
 
+  function requestListingType(next: ListingWizardType) {
+    if (form.listingType === next) return
+    if (!editMode && hasMeaningfulWizardData(form)) {
+      setPendingListingType(next)
+      setTypeChangeOpen(true)
+      return
+    }
+    setForm({ ...emptyWizardState(), listingType: next })
+    clearNewFiles()
+  }
+
+  function confirmListingTypeChange() {
+    if (!pendingListingType) return
+    setForm({ ...emptyWizardState(), listingType: pendingListingType })
+    clearNewFiles()
+    setPendingListingType(null)
+    setTypeChangeOpen(false)
+  }
+
   async function generateUniqueSlug(title: string): Promise<string> {
     let slug = slugify(title)
     if (!slug) slug = "anunt"
-
     const available = await checkSlugAvailable(slug)
     if (available) return slug
-
-    // Append random suffix if collision
     const suffix = Math.random().toString(36).substring(2, 7)
     return `${slug}-${suffix}`
   }
 
-  async function handleSubmit() {
+  function handleNext() {
     setError(null)
+    const msg = validateStep(step, form)
+    if (msg) {
+      setError(msg)
+      return
+    }
+    setStep((s) => Math.min(4, s + 1))
+  }
 
-    if (!form.title.trim()) { setError("Titlul este obligatoriu."); return }
-    if (!form.price || Number(form.price) < 0) { setError("Pretul este obligatoriu si trebuie sa fie >= 0."); return }
+  function handleBack() {
+    setError(null)
+    setStep((s) => Math.max(1, s - 1))
+  }
+
+  async function runSubmit(isDraft: boolean) {
+    setError(null)
+    if (!form.listingType) {
+      setError("Selectati tipul anuntului.")
+      return
+    }
+    const detailErr = validateDetailsStep(form.listingType, form)
+    if (detailErr) {
+      setError(detailErr)
+      setStep(2)
+      return
+    }
 
     setSaving(true)
-
     try {
       const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setError("Nu esti autentificat."); setSaving(false); return }
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) {
+        setError("Nu esti autentificat.")
+        setSaving(false)
+        return
+      }
+
+      const payload = toListingPayload(form, isDraft)
 
       if (editMode && listing) {
-        // --- UPDATE flow ---
-        const updates: Record<string, unknown> = {
-          title: form.title.trim(),
-          category_id: form.categoryId ? Number(form.categoryId) : null,
-          description: form.description.trim() || null,
-          price: Number(form.price),
-          unit: form.unit,
-          currency: form.currency,
-          available_qty: Number(form.availableQty) || 0,
-          location: form.location.trim() || null,
-          is_active: form.isActive,
+        const updates: ListingUpdate = {
+          ...payload,
         }
-
-        // Re-generate slug if title changed
         if (form.title.trim() !== listing.title) {
           updates.slug = await generateUniqueSlug(form.title.trim())
         }
-
         const res = await updateListing(listing.id, updates)
-        if (!res.success) { setError(res.error ?? "Eroare la actualizare."); setSaving(false); return }
-
-        // Delete removed images
+        if (!res.success) {
+          setError(res.error ?? "Eroare la actualizare.")
+          setSaving(false)
+          return
+        }
         for (const imgId of deletedImageIds) {
           const img = existingImages.find((i) => i.id === imgId)
           if (img) await deleteListingImage(img.id, img.storage_path)
         }
-
-        // Upload new images
         const baseOrder = remainingExisting.length
         for (let i = 0; i < newFiles.length; i++) {
           await uploadListingImage(listing.id, newFiles[i], baseOrder + i)
         }
-
         const finalSlug = (updates.slug as string) ?? listing.slug
         router.push(`/products/${finalSlug}-${listing.id}`)
         router.refresh()
-      } else {
-        // --- CREATE flow ---
-        const slug = await generateUniqueSlug(form.title.trim())
-
-        const res = await createListing({
-          seller_id: user.id,
-          title: form.title.trim(),
-          slug,
-          category_id: form.categoryId ? Number(form.categoryId) : null,
-          description: form.description.trim() || null,
-          price: Number(form.price),
-          unit: form.unit,
-          currency: form.currency,
-          available_qty: Number(form.availableQty) || 0,
-          location: form.location.trim() || null,
-          is_active: form.isActive,
-        })
-
-        if (!res.success || !res.data) { setError(res.error ?? "Eroare la creare."); setSaving(false); return }
-
-        // Upload images
-        for (let i = 0; i < newFiles.length; i++) {
-          await uploadListingImage(res.data.id, newFiles[i], i)
-        }
-
-        router.push(`/products/${slug}-${res.data.id}`)
-        router.refresh()
+        return
       }
+
+      const slug = await generateUniqueSlug(form.title.trim())
+      const res = await createListing({
+        seller_id: user.id,
+        slug,
+        ...payload,
+      })
+      if (!res.success || !res.data) {
+        setError(res.error ?? "Eroare la creare.")
+        setSaving(false)
+        return
+      }
+      for (let i = 0; i < newFiles.length; i++) {
+        await uploadListingImage(res.data.id, newFiles[i], i)
+      }
+      router.push(`/products/${slug}-${res.data.id}`)
+      router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare neasteptata.")
       setSaving(false)
@@ -227,242 +431,184 @@ export function ListingForm({ categories, editMode = false, listing, existingIma
     }
   }
 
+  const footerPrimaryLabel =
+    step === 4 ? (editMode ? "Salveaza modificarile" : "Publica anuntul") : "Continua"
+
   return (
-    <div className="space-y-6">
-      {/* Basic info */}
-      <Card>
-        <CardHeader><CardTitle>Detalii Anunt</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <Label>Titlu *</Label>
-            <Input
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              placeholder="ex: Beton C25/30 livrat cu autobetoniera"
-              className="mt-1"
-            />
-          </div>
+    <div className="pb-28 md:pb-6">
+      <ListingWizardStepper currentStep={step} />
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label>Categorie</Label>
-              <Select value={form.categoryId} onValueChange={(v) => setForm({ ...form, categoryId: v })}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Selecteaza" /></SelectTrigger>
-                <SelectContent>
-                  {categories.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Locatie</Label>
-              <Input
-                value={form.location}
-                onChange={(e) => setForm({ ...form, location: e.target.value })}
-                placeholder="ex: Bucuresti"
-                className="mt-1"
-              />
-            </div>
-          </div>
+      <p className="mb-4 text-sm text-muted-foreground md:hidden">
+        Pasul {step} din 4
+      </p>
 
-          <div>
-            <Label>Descriere</Label>
-            <Textarea
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Descrie produsul, specificatii, conditii de livrare..."
-              rows={5}
-              className="mt-1"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Pricing */}
-      <Card>
-        <CardHeader><CardTitle>Pret si Cantitate</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div>
-              <Label>Pret *</Label>
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
-                value={form.price}
-                onChange={(e) => setForm({ ...form, price: e.target.value })}
-                placeholder="0.00"
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label>Unitate</Label>
-              <Select value={form.unit} onValueChange={(v) => setForm({ ...form, unit: v })}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {UNITS.map((u) => (
-                    <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Moneda</Label>
-              <Select value={form.currency} onValueChange={(v) => setForm({ ...form, currency: v })}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {CURRENCIES.map((c) => (
-                    <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="max-w-xs">
-            <Label>Cantitate Disponibila</Label>
-            <Input
-              type="number"
-              min={0}
-              step="0.01"
-              value={form.availableQty}
-              onChange={(e) => setForm({ ...form, availableQty: e.target.value })}
-              className="mt-1"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Images */}
-      <Card>
-        <CardHeader><CardTitle>Imagini</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          {/* Existing images (edit mode) */}
-          {remainingExisting.length > 0 && (
-            <div>
-              <p className="mb-2 text-sm font-medium text-muted-foreground">Imagini existente</p>
-              <div className="flex flex-wrap gap-3">
-                {remainingExisting.map((img) => (
-                  <div key={img.id} className="group relative h-24 w-32 overflow-hidden rounded-lg border">
-                    <Image
-                      src={getImagePublicUrl(img.storage_path)}
-                      alt="Imagine anunt"
-                      fill
-                      className="object-cover"
-                      sizes="128px"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => markExistingForDeletion(img.id)}
-                      className="absolute right-1 top-1 rounded-full bg-destructive/80 p-1 text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* New file previews */}
-          {newPreviews.length > 0 && (
-            <div>
-              <p className="mb-2 text-sm font-medium text-muted-foreground">Imagini noi</p>
-              <div className="flex flex-wrap gap-3">
-                {newPreviews.map((url, i) => (
-                  <div key={i} className="group relative h-24 w-32 overflow-hidden rounded-lg border">
-                    <Image
-                      src={url}
-                      alt={`Preview ${i + 1}`}
-                      fill
-                      className="object-cover"
-                      sizes="128px"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeNewFile(i)}
-                      className="absolute right-1 top-1 rounded-full bg-destructive/80 p-1 text-destructive-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Upload zone */}
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/30 p-8 transition-colors hover:border-primary/50 hover:bg-muted/30"
-          >
-            <Upload className="h-8 w-8 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">Click pentru a adauga imagini</p>
-            <p className="text-xs text-muted-foreground">JPEG, PNG, WebP (max 5MB)</p>
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            multiple
-            onChange={handleFileSelect}
-            className="hidden"
+      {step === 1 && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold text-foreground">Alege tipul anuntului</h2>
+          <WizardStepType
+            value={form.listingType}
+            onChange={requestListingType}
           />
-        </CardContent>
-      </Card>
+        </div>
+      )}
 
-      {/* Error */}
+      {step === 2 && form.listingType === "concrete" && (
+        <WizardStepDetailsConcrete
+          form={form}
+          setForm={setForm}
+          categories={categories}
+        />
+      )}
+      {step === 2 && form.listingType === "materials" && (
+        <WizardStepDetailsMaterials
+          form={form}
+          setForm={setForm}
+          categories={categories}
+        />
+      )}
+      {step === 2 && form.listingType === "equipment" && (
+        <WizardStepDetailsEquipment
+          form={form}
+          setForm={setForm}
+          categories={categories}
+        />
+      )}
+      {step === 2 && form.listingType === "services" && (
+        <WizardStepDetailsServices
+          form={form}
+          setForm={setForm}
+          categories={categories}
+        />
+      )}
+
+      {step === 3 && (
+        <WizardStepImages
+          listingType={form.listingType}
+          remainingExisting={remainingExisting}
+          newPreviews={newPreviews}
+          fileInputRef={fileInputRef}
+          onPickFiles={handleFileSelect}
+          onRemoveNew={removeNewFile}
+          onMarkExistingDeleted={markExistingForDeletion}
+        />
+      )}
+
+      {step === 4 && <WizardStepReview form={form} setForm={setForm} />}
+
       {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="mt-4 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      {/* Actions */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Button onClick={handleSubmit} disabled={saving || deleting} className="bg-primary text-primary-foreground hover:bg-primary/90">
-            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {editMode ? "Salveaza Modificarile" : "Publica Anuntul"}
-          </Button>
-          {!editMode && (
-            <Button
-              variant="outline"
-              disabled={saving}
-              onClick={() => { setForm({ ...form, isActive: false }); setTimeout(handleSubmit, 0) }}
-            >
-              Salveaza ca Ciorna
-            </Button>
-          )}
+      {/* Sticky mobile footer + desktop inline actions */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-4px_12px_rgba(0,0,0,0.06)] md:static md:z-0 md:border-0 md:bg-transparent md:p-0 md:shadow-none">
+        <div className="mx-auto flex max-w-3xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex gap-2">
+            {step > 1 && (
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11 flex-1 sm:flex-none"
+                onClick={handleBack}
+                disabled={saving || deleting}
+              >
+                Inapoi
+              </Button>
+            )}
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {step < 4 && (
+              <Button
+                type="button"
+                className="min-h-11 w-full sm:w-auto"
+                onClick={handleNext}
+                disabled={saving || deleting}
+              >
+                {footerPrimaryLabel}
+              </Button>
+            )}
+            {step === 4 && (
+              <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
+                {!editMode && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-11 w-full sm:w-auto"
+                    disabled={saving}
+                    onClick={() => runSubmit(true)}
+                  >
+                    {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Salveaza ca ciorna
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  className="min-h-11 w-full sm:w-auto bg-primary text-primary-foreground hover:bg-primary/90"
+                  disabled={saving || deleting}
+                  onClick={() => runSubmit(false)}
+                >
+                  {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {editMode ? "Salveaza modificarile" : "Publica anuntul"}
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
+      </div>
 
-        {editMode && listing && (
+      {/* Type change confirmation */}
+      <AlertDialog open={typeChangeOpen} onOpenChange={setTypeChangeOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Schimbi tipul anuntului?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Datele completate vor fi resetate. Puteti selecta din nou tipul si
+              completati campurile.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingListingType(null)}>
+              Anuleaza
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={confirmListingTypeChange}>
+              Continua
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {editMode && listing && (
+        <div className="mt-8 flex justify-end border-t border-border pt-6">
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="destructive" size="sm" disabled={saving || deleting}>
                 {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 <Trash2 className="mr-1 h-4 w-4" />
-                Sterge Anuntul
+                Sterge anuntul
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Sterge anuntul?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Aceasta actiune este ireversibila. Anuntul si toate imaginile asociate vor fi sterse permanent.
+                  Aceasta actiune este ireversibila. Anuntul si toate imaginile asociate vor fi
+                  sterse permanent.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Anuleaza</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                  Sterge Definitiv
+                <AlertDialogAction
+                  onClick={handleDelete}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Sterge definitiv
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -56,6 +56,9 @@ export interface BidRow {
 // Product / Marketplace
 export type ProductUnit = "TON" | "KG" | "M3" | "BUC" | "ML"
 
+/** Mirrors marketplace_listings.listing_type — drives PDP and cart behaviour. */
+export type ListingKind = "concrete" | "materials" | "equipment" | "services"
+
 export interface ProductListItem {
   id: string
   slug: string
@@ -66,11 +69,41 @@ export interface ProductListItem {
   availableQty: number
   thumbnailUrl: string
   category: string
+  /** When set, product cards can show the correct CTA label. */
+  listingKind?: ListingKind
 }
 
 export interface ProductDetail extends ProductListItem {
   description: string
   images: string[]
+  /** Seller profile id (UUID) — needed for calculator / configurare flow */
+  sellerId: string
+  /** FK to categories.id when set */
+  categoryId: number | null
+  /** Listing location label from DB */
+  location: string | null
+  sellerDisplayName: string | null
+  sellerPhone: string | null
+  /** concrete → distance calculator; other kinds use fixed fees or simple add-to-cart. */
+  listingKind: ListingKind
+  /** Fixed transport add-on (materials / some equipment); RON/EUR per listing currency. */
+  transportFee: number | null
+  minOrderQty: number | null
+  pickupLat: number | null
+  pickupLng: number | null
+  transportModes: string[] | null
+  serviceArea: string | null
+}
+
+/** Snapshot of livrare + fiscal from configurare; also stored for checkout prefill */
+export interface OrderConfigureBuyerDelivery {
+  addressLine1: string
+  city: string
+  county: string
+  country: string
+  isCompany: boolean
+  companyName?: string
+  vatNumber?: string
 }
 
 // Cart
@@ -83,6 +116,23 @@ export interface CartItem {
   qty: number
   availableQty: number
   thumbnailUrl: string
+  /**
+   * When true, checkout is blocked until configurationComplete is true.
+   * Legacy cart rows omit both flags → treated as not requiring calculator.
+   */
+  configurationRequired?: boolean
+  configurationComplete?: boolean
+  /** Calculator total with TVA; line display uses price * qty === this when set consistently */
+  quoteSummary?: {
+    totalGross: number
+    isManual: boolean
+    calcType: string
+    transportNote?: string
+  }
+  /** Livrare + fiscal captured at configurare (optional prefill for checkout) */
+  configureDelivery?: OrderConfigureBuyerDelivery
+  /** One-time transport surcharge for non-calculator listings (added to line total). */
+  transportFee?: number
 }
 
 // Orders

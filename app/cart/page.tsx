@@ -1,11 +1,13 @@
 "use client"
 
+import { useMemo } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { Minus, Plus, Trash2, ShoppingCart, ArrowRight } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
 import { MoneyDisplay } from "@/components/shared/money-display"
 import { EmptyState } from "@/components/shared/empty-state"
@@ -13,6 +15,16 @@ import { useCart } from "@/lib/cart-context"
 
 export default function CartPage() {
   const { items, updateQty, removeItem, totalPrice, clearCart } = useCart()
+
+  const checkoutBlocked = useMemo(
+    () =>
+      items.some(
+        (i) =>
+          i.configurationRequired === true &&
+          i.configurationComplete !== true,
+      ),
+    [items],
+  )
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -54,6 +66,33 @@ export default function CartPage() {
                         <MoneyDisplay amount={item.price} currency={item.currency} />{" "}
                         / {item.unit}
                       </p>
+                      {item.quoteSummary && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {item.quoteSummary.isManual ? (
+                            <Badge
+                              variant="outline"
+                              className="rounded-md border-amber-300 bg-amber-50 text-amber-900 text-[10px]"
+                            >
+                              Transport manual / parțial
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="rounded-md border-emerald-200 bg-emerald-50 text-emerald-900 text-[10px]"
+                            >
+                              Ofertă calculată
+                            </Badge>
+                          )}
+                          <span className="text-[11px] text-muted-foreground">
+                            Total estimat cu TVA:{" "}
+                            <MoneyDisplay
+                              amount={item.quoteSummary.totalGross}
+                              currency={item.currency}
+                              className="inline font-medium text-foreground"
+                            />
+                          </span>
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="flex items-center gap-1">
@@ -86,11 +125,18 @@ export default function CartPage() {
                           <Plus className="h-3 w-3" />
                         </Button>
                       </div>
-                      <MoneyDisplay
-                        amount={item.price * item.qty}
-                        currency={item.currency}
-                        className="ml-auto font-bold text-card-foreground"
-                      />
+                      <div className="ml-auto text-right">
+                        <MoneyDisplay
+                          amount={item.price * item.qty + (item.transportFee ?? 0)}
+                          currency={item.currency}
+                          className="font-bold text-card-foreground"
+                        />
+                        {(item.transportFee ?? 0) > 0 && (
+                          <p className="text-[10px] text-muted-foreground">
+                            inclus transport fix
+                          </p>
+                        )}
+                      </div>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -134,9 +180,16 @@ export default function CartPage() {
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Livrare</span>
                   <span className="text-sm text-muted-foreground">
-                    Se calculeaza
+                    {items.some((i) => i.quoteSummary?.isManual)
+                      ? "Parțială — verificați oferta"
+                      : "Inclusă în linii (estimativ)"}
                   </span>
                 </div>
+                {checkoutBlocked && (
+                  <p className="text-sm text-destructive">
+                    Unele produse necesită configurare înainte de plată.
+                  </p>
+                )}
                 <div className="border-t pt-4">
                   <div className="flex items-center justify-between">
                     <span className="text-lg font-bold text-foreground">Total</span>
@@ -147,16 +200,28 @@ export default function CartPage() {
                     />
                   </div>
                 </div>
-                <Button
-                  asChild
-                  size="lg"
-                  className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-                >
-                  <Link href="/checkout">
+                {checkoutBlocked ? (
+                  <Button
+                    type="button"
+                    size="lg"
+                    className="w-full"
+                    disabled
+                  >
                     Continua la plata
                     <ArrowRight className="ml-2 h-4 w-4" />
-                  </Link>
-                </Button>
+                  </Button>
+                ) : (
+                  <Button
+                    asChild
+                    size="lg"
+                    className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+                  >
+                    <Link href="/checkout">
+                      Continua la plata
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Link>
+                  </Button>
+                )}
               </CardContent>
             </Card>
           </div>

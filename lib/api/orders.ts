@@ -1,16 +1,16 @@
 import type { OrderSummary, OrderDetail } from "@/types/domain"
-import { mockOrders, mockOrderDetails } from "./mock-data"
 
 const delay = (ms = 400) => new Promise((r) => setTimeout(r, ms))
 
+// Orders API: replace with Supabase when order pipeline is implemented
 export async function getOrders(): Promise<OrderSummary[]> {
   await delay()
-  return [...mockOrders]
+  return []
 }
 
-export async function getOrderDetail(id: string): Promise<OrderDetail | null> {
+export async function getOrderDetail(_id: string): Promise<OrderDetail | null> {
   await delay()
-  return mockOrderDetails[id] ?? null
+  return null
 }
 
 export interface CheckoutData {
@@ -28,7 +28,7 @@ export interface CheckoutData {
 }
 
 export async function createCheckout(
-  data: CheckoutData
+  _data: CheckoutData
 ): Promise<{ success: boolean; orderId?: string; checkoutUrl?: string }> {
   await delay(800)
   return {

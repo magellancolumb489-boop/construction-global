@@ -1,37 +1,62 @@
 import Link from "next/link";
 import {
-  ArrowRight as ArrowRightIcon,
-  BadgeEuro,
+  ArrowRight,
   Building2,
-  CheckCircle2,
-  ChevronRight,
-  Clock3,
   Gavel,
-  Hammer,
   Package,
-  Shield,
-  Sparkles,
+  Smartphone,
   Store,
-  Truck,
-  Wrench,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { AuctionCard } from "@/components/shared/auction-card";
 import { ProductCard } from "@/components/shared/product-card";
 import { getAuctions } from "@/lib/api/auctions";
 import { getProductListItems } from "@/lib/api/listings";
 
+/** Category shortcuts — marketplace entry points */
 const constructionTopics = [
-  "otel beton",
-  "ciment",
-  "agregate",
-  "prefabricate",
-  "utilaje",
-  "containere",
-  "cofraje",
-  "panouri",
+  { label: "otel beton", href: "/marketplace" },
+  { label: "ciment", href: "/marketplace" },
+  { label: "agregate", href: "/marketplace" },
+  { label: "prefabricate", href: "/marketplace" },
+  { label: "utilaje", href: "/marketplace" },
+  { label: "containere", href: "/marketplace" },
+  { label: "cofraje", href: "/marketplace" },
+  { label: "panouri", href: "/marketplace" },
 ];
+
+/** Trust row: short label + one supporting line (Swiss: structure + scan) */
+const trustItems = [
+  {
+    icon: Smartphone,
+    label: "Mobil",
+    hint: "CTA-uri mari, ierarhie clara pe ecran mic.",
+  },
+  {
+    icon: Gavel,
+    label: "Licitatii live",
+    hint: "Termen, oferta curenta, licitatori — la vedere.",
+  },
+  {
+    icon: Package,
+    label: "Materiale",
+    hint: "Pret / unitate, stoc, livrare unde e cazul.",
+  },
+  {
+    icon: Building2,
+    label: "Constructii",
+    hint: "Focus pe santier, nu pe marketing generic.",
+  },
+] as const;
+
+/** Hero sidebar: compressed facts, mono index — Swiss editorial rail */
+const heroKeyPoints = [
+  "Licitatii cu termen si pas minim vizibile.",
+  "Magazin: configurare unde e nevoie, altfel pret direct.",
+  "Publicare rapida: imagini, cantitate, locatie.",
+] as const;
 
 export default async function HomePage() {
   const [auctionsData, productsData] = await Promise.all([
@@ -41,620 +66,432 @@ export default async function HomePage() {
 
   const endingSoonAuctions = auctionsData.items.slice(0, 4);
   const popularProducts = productsData.items;
+  const auctionCount = endingSoonAuctions.length;
+  const productCount = popularProducts.length;
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[#0a0e13] text-white">
-      {/* HERO */}
-      <section className="relative isolate overflow-hidden border-b border-white/10">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(251,191,36,0.18),transparent_28%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_85%_18%,rgba(245,158,11,0.12),transparent_24%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_70%,rgba(255,255,255,0.05),transparent_22%)]" />
-        <div className="absolute inset-0 opacity-[0.06] [background-image:linear-gradient(rgba(255,255,255,0.35)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.35)_1px,transparent_1px)] [background-size:28px_28px]" />
+    <div className="min-h-screen overflow-x-hidden bg-zinc-50 text-zinc-900">
+      {/* 01 — Hero: modular grid, generous rhythm, editorial rail */}
+      <section
+        id="intro"
+        className="relative scroll-mt-20 border-b border-zinc-200 bg-white"
+      >
+        <div
+          className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#e4e4e7_1px,transparent_1px),linear-gradient(to_bottom,#e4e4e7_1px,transparent_1px)] bg-size-[48px_48px] opacity-[0.35] motion-reduce:opacity-[0.12]"
+          aria-hidden
+        />
 
-        <div className="pointer-events-none absolute left-[-120px] top-10 h-72 w-72 rounded-full bg-amber-400/10 blur-3xl motion-safe:animate-pulse" />
-        <div className="pointer-events-none absolute right-[-120px] top-32 h-72 w-72 rounded-full bg-orange-400/10 blur-3xl motion-safe:animate-pulse" />
-
-        <div className="relative mx-auto max-w-7xl px-4 pb-12 pt-8 sm:px-6 sm:pb-16 sm:pt-10 lg:px-8 lg:pb-24 lg:pt-14">
-          <div className="mb-6 flex flex-wrap items-center gap-2">
-            <div className="inline-flex items-center gap-2 rounded-full border border-amber-400/20 bg-amber-500/10 px-3 py-1.5 backdrop-blur">
-              <Sparkles className="h-3.5 w-3.5 text-amber-300" />
-              <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-amber-200">
-                platforma noua
-              </span>
-            </div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 backdrop-blur">
-              <Clock3 className="h-3.5 w-3.5 text-white/70" />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">
-                mobile first
-              </span>
-            </div>
-          </div>
-
-          <div className="grid gap-8 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
-            {/* left */}
-            <div className="relative">
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
-                <Hammer className="h-3.5 w-3.5 text-amber-300" />
-                licitatii + marketplace pentru constructii
+        <div className="relative mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-28">
+          <div className="grid gap-12 lg:grid-cols-[minmax(0,1.15fr)_minmax(260px,0.85fr)] lg:gap-16 xl:gap-20">
+            <div className="home-hero-stagger min-w-0">
+              <div className="home-hero-item flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                <p className="font-mono text-[10px] font-medium uppercase tracking-[0.24em] text-zinc-500">
+                  01 / Intro
+                </p>
+                <span className="hidden text-zinc-300 sm:inline">—</span>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-400">
+                  ConstructionHub
+                </p>
               </div>
 
-              <h1 className="mt-5 max-w-5xl text-balance text-[2.5rem] font-black leading-[0.95] tracking-[-0.055em] text-white sm:text-5xl md:text-6xl lg:text-7xl">
-                Cumperi, vinzi si
-                <span className="block bg-gradient-to-r from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent">
-                  licitezi mai clar
+              <h1 className="home-hero-item mt-6 text-balance text-4xl font-semibold leading-[1.06] tracking-[-0.045em] text-zinc-900 sm:text-5xl lg:text-[3.25rem] xl:text-6xl">
+                Licitatii si materiale,
+                <span className="mt-1 block text-zinc-600">
+                  intr-un singur loc.
                 </span>
-                <span className="block text-white/90">in constructii</span>
               </h1>
 
-              <p className="mt-5 max-w-2xl text-pretty text-sm leading-7 text-slate-300 sm:text-base md:text-lg">
-                O platforma construita pentru materiale, utilaje, stocuri si
-                oportunitati reale. Mai putin aspect generic, mai mult accent pe
-                informatie, incredere si actiuni rapide de pe mobil.
+              <p className="home-hero-item mt-8 max-w-xl text-pretty text-[15px] leading-[1.65] text-zinc-600 sm:text-base">
+                Platforma pentru firme si echipe de santier: gasesti oferta,
+                termenul si starea produsului fara sa citesti pagini intregi.
+                Totul e gandit pentru scan rapid — pe teren sau din birou.
               </p>
 
-              <div className="mt-7 grid gap-3 sm:flex sm:flex-wrap">
+              <div className="home-hero-item mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                 <Button
                   size="lg"
                   asChild
-                  className="h-12 rounded-2xl border border-amber-300/20 bg-gradient-to-r from-amber-400 via-amber-500 to-orange-500 px-6 text-sm font-bold text-[#1e1404] shadow-[0_10px_30px_rgba(245,158,11,0.3)] transition hover:scale-[1.01] hover:from-amber-300 hover:to-orange-400 sm:text-base"
+                  className="h-11 rounded-md px-7 text-sm font-semibold shadow-sm transition-transform duration-200 motion-safe:hover:-translate-y-0.5"
                 >
                   <Link href="/auctions">
-                    <Gavel className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
-                    Exploreaza licitatiile
+                    <Gavel className="mr-2 h-4 w-4" />
+                    Licitatii
                   </Link>
                 </Button>
-
                 <Button
                   size="lg"
+                  variant="outline"
                   asChild
-                  className="h-12 rounded-2xl border border-white/15 bg-white/5 px-6 text-sm font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition hover:scale-[1.01] hover:bg-white/10 sm:text-base"
+                  className="h-11 rounded-md border-zinc-300 bg-white px-7 text-sm font-semibold text-zinc-900 shadow-sm transition-transform duration-200 hover:bg-zinc-50 motion-safe:hover:-translate-y-0.5"
                 >
                   <Link href="/marketplace">
-                    <Store className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
-                    Vezi marketplace
+                    <Store className="mr-2 h-4 w-4" />
+                    Marketplace
                   </Link>
                 </Button>
-
                 <Button
                   size="lg"
+                  variant="ghost"
                   asChild
-                  className="h-12 rounded-2xl border border-amber-400/30 bg-transparent px-6 text-sm font-bold text-amber-300 transition hover:scale-[1.01] hover:bg-amber-400/10 sm:text-base"
+                  className="h-11 rounded-md px-6 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
                 >
                   <Link href="/sell/auction/new">
                     Publica licitatie
-                    <ArrowRightIcon className="ml-2 h-4 w-4 sm:h-5 sm:w-5" />
+                    <ArrowRight className="ml-2 h-4 w-4 opacity-70" />
                   </Link>
                 </Button>
               </div>
 
-              <div className="mt-8 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur">
-                  <p className="text-sm font-bold text-white">Design cinstit</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-400">
-                    Fara statistici inventate. Proiect nou, construit corect,
-                    pas cu pas.
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur">
-                  <p className="text-sm font-bold text-white">
-                    Util pe santier
-                  </p>
-                  <p className="mt-1 text-sm leading-6 text-slate-400">
-                    Structura simpla, CTA-uri clare, informatie usor de scanat
-                    pe telefon.
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur">
-                  <p className="text-sm font-bold text-white">
-                    Focus industrial
-                  </p>
-                  <p className="mt-1 text-sm leading-6 text-slate-400">
-                    Materiale, utilaje, containere, stocuri si licitatii
-                    relevante pentru domeniu.
-                  </p>
+              <div className="home-hero-item mt-12 space-y-3">
+                <p className="font-mono text-[10px] font-medium uppercase tracking-[0.2em] text-zinc-400">
+                  Domenii
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {constructionTopics.map(({ label, href }) => (
+                    <Link
+                      key={label}
+                      href={href}
+                      className="rounded-sm border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-medium text-zinc-600 transition-colors duration-200 hover:border-zinc-400 hover:text-zinc-900 motion-safe:active:scale-[0.98]"
+                    >
+                      {label}
+                    </Link>
+                  ))}
                 </div>
               </div>
+            </div>
 
-              <div className="mt-6 flex flex-wrap gap-2">
-                {constructionTopics.map((topic) => (
+            {/* Editorial rail: vertical rule, mono, asymmetric balance */}
+            <aside className="flex flex-col border-t border-zinc-200 pt-10 lg:border-l lg:border-t-0 lg:pl-10 lg:pt-2 xl:pl-14">
+              <div className="home-hero-aside relative flex flex-1 flex-col justify-between gap-10">
+                <div>
+                  <p className="font-mono text-[10px] font-medium uppercase tracking-[0.22em] text-zinc-500">
+                    Rezumat operativ
+                  </p>
+                  <ul className="mt-6 space-y-5 border-l-2 border-zinc-200 pl-5">
+                    {heroKeyPoints.map((line) => (
+                      <li
+                        key={line}
+                        className="text-sm leading-relaxed text-zinc-600"
+                      >
+                        {line}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="flex items-end justify-between gap-4 border-t border-zinc-100 pt-8">
+                  <p className="max-w-48 font-mono text-[10px] leading-relaxed text-zinc-400">
+                    Versiune platforma in evolutie. Raportezi o problema? Ne
+                    ajuta sa o indreptam repede.
+                  </p>
                   <span
-                    key={topic}
-                    className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-slate-300"
+                    className="select-none font-mono text-5xl font-light tabular-nums leading-none text-zinc-200 sm:text-6xl"
+                    aria-hidden
                   >
-                    {topic}
+                    RO
                   </span>
-                ))}
-              </div>
-            </div>
-
-            {/* right */}
-            <div className="relative">
-              <div className="absolute inset-0 rounded-[30px] bg-gradient-to-br from-amber-500/20 via-transparent to-transparent blur-2xl" />
-
-              <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.04] p-4 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-5">
-                <div className="absolute inset-0 bg-[linear-gradient(to_bottom_right,rgba(255,255,255,0.06),transparent_35%,transparent)]" />
-                <div className="absolute right-0 top-0 h-28 w-28 rounded-full bg-amber-400/10 blur-2xl motion-safe:animate-pulse" />
-
-                <div className="relative">
-                  <div className="mb-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-300">
-                        Flux rapid
-                      </p>
-                      <p className="mt-1 text-sm text-slate-300">
-                        O structura cu personalitate, nu un landing generic
-                      </p>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-black/20 p-2">
-                      <Building2 className="h-5 w-5 text-amber-400" />
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3">
-                    <div className="group rounded-2xl border border-white/10 bg-[#10161d] p-4 transition hover:border-amber-400/20 hover:bg-[#111922]">
-                      <div className="flex items-start gap-3">
-                        <div className="rounded-xl bg-amber-500/12 p-2 ring-1 ring-amber-400/10">
-                          <Store className="h-5 w-5 text-amber-400" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-white">Publici rapid</p>
-                          <p className="mt-1 text-sm leading-6 text-slate-400">
-                            Adaugi produs sau licitatie, incarci imagini si
-                            completezi esentialul.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="group rounded-2xl border border-white/10 bg-[#10161d] p-4 transition hover:border-amber-400/20 hover:bg-[#111922]">
-                      <div className="flex items-start gap-3">
-                        <div className="rounded-xl bg-amber-500/12 p-2 ring-1 ring-amber-400/10">
-                          <Gavel className="h-5 w-5 text-amber-400" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-white">
-                            Primesti oferte si interes
-                          </p>
-                          <p className="mt-1 text-sm leading-6 text-slate-400">
-                            Utilizatorii pot urmari, licita si compara mai usor
-                            ofertele.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="group rounded-2xl border border-white/10 bg-[#10161d] p-4 transition hover:border-amber-400/20 hover:bg-[#111922]">
-                      <div className="flex items-start gap-3">
-                        <div className="rounded-xl bg-amber-500/12 p-2 ring-1 ring-amber-400/10">
-                          <BadgeEuro className="h-5 w-5 text-amber-400" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-white">
-                            Decizii mai clare
-                          </p>
-                          <p className="mt-1 text-sm leading-6 text-slate-400">
-                            Mai putin zgomot vizual, mai mult focus pe produs,
-                            pret si actiune.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/60">
-                        ton vizual
-                      </p>
-                      <p className="mt-2 text-sm font-semibold text-white">
-                        Carbune, metal, amber
-                      </p>
-                      <p className="mt-1 text-xs leading-5 text-slate-400">
-                        Mai potrivit pentru constructii decat combinatii
-                        colorate de tip startup.
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/60">
-                        micro motion
-                      </p>
-                      <p className="mt-2 text-sm font-semibold text-white">
-                        Subtil, nu agresiv
-                      </p>
-                      <p className="mt-1 text-xs leading-5 text-slate-400">
-                        Glow-uri, ping-uri si tranzitii discrete care dau viata
-                        paginii.
-                      </p>
-                    </div>
-                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-
-          {/* mobile quick links */}
-          <div className="mt-8 grid gap-3 sm:hidden">
-            <Link
-              href="/auctions"
-              className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
-            >
-              <span className="flex items-center gap-2">
-                <Gavel className="h-4 w-4 text-amber-400" />
-                Licitatii active
-              </span>
-              <ChevronRight className="h-4 w-4 text-white/60" />
-            </Link>
-
-            <Link
-              href="/marketplace"
-              className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
-            >
-              <span className="flex items-center gap-2">
-                <Store className="h-4 w-4 text-amber-400" />
-                Marketplace materiale
-              </span>
-              <ChevronRight className="h-4 w-4 text-white/60" />
-            </Link>
+            </aside>
           </div>
         </div>
       </section>
 
-      {/* FEATURE STRIP */}
-      <section className="border-b border-white/10 bg-[#0d131a]">
-        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-              <div className="flex items-center gap-3">
-                <div className="rounded-xl bg-amber-500/12 p-2 ring-1 ring-amber-400/10">
-                  <Shield className="h-5 w-5 text-amber-400" />
-                </div>
-                <div>
-                  <p className="font-bold text-white">Mai multa claritate</p>
-                  <p className="text-xs leading-5 text-slate-400">
-                    Flux simplu pentru cumparare si publicare
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-              <div className="flex items-center gap-3">
-                <div className="rounded-xl bg-amber-500/12 p-2 ring-1 ring-amber-400/10">
-                  <Truck className="h-5 w-5 text-amber-400" />
-                </div>
-                <div>
-                  <p className="font-bold text-white">Potrivit pentru mobil</p>
-                  <p className="text-xs leading-5 text-slate-400">
-                    Utilizatori din teren, birou sau deplasare
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-              <div className="flex items-center gap-3">
-                <div className="rounded-xl bg-amber-500/12 p-2 ring-1 ring-amber-400/10">
-                  <Package className="h-5 w-5 text-amber-400" />
-                </div>
-                <div>
-                  <p className="font-bold text-white">Orientat pe industrie</p>
-                  <p className="text-xs leading-5 text-slate-400">
-                    Materiale, utilaje, stocuri si licitatii
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-              <div className="flex items-center gap-3">
-                <div className="rounded-xl bg-amber-500/12 p-2 ring-1 ring-amber-400/10">
-                  <Wrench className="h-5 w-5 text-amber-400" />
-                </div>
-                <div>
-                  <p className="font-bold text-white">Aspect mai solid</p>
-                  <p className="text-xs leading-5 text-slate-400">
-                    Mai mult caracter, mai putin sablon
-                  </p>
-                </div>
-              </div>
-            </div>
+      {/* Cuprins: Swiss index strip */}
+      <nav
+        className="border-b border-zinc-200 bg-zinc-50"
+        aria-label="Cuprins pagina"
+      >
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.24em] text-zinc-500">
+            Cuprins
+          </span>
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-2 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-600">
+            <a
+              href="#intro"
+              className="transition-colors hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              01 Intro
+            </a>
+            <a
+              href="#puncte"
+              className="transition-colors hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              02 Puncte
+            </a>
+            <a
+              href="#live"
+              className="transition-colors hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              03 Licitatii
+            </a>
+            <a
+              href="#magazin"
+              className="transition-colors hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              04 Magazin
+            </a>
           </div>
         </div>
-      </section>
+      </nav>
 
-      {/* AUCTIONS */}
-      <section className="bg-[#0a0e13] py-14 sm:py-16 lg:py-20">
+      {/* 02 — Trust: headline + cards + footnote */}
+      <section
+        id="puncte"
+        className="scroll-mt-20 border-b border-zinc-200 bg-white py-14 sm:py-16 lg:py-20"
+      >
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-7 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-amber-400/15 bg-amber-500/10 px-3 py-1">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-300 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
-                </span>
-                <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-300">
-                  live
-                </span>
-              </div>
-              <h2 className="text-2xl font-black tracking-[-0.04em] text-white sm:text-3xl lg:text-4xl">
-                Licitatii active
+          <div className="mb-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-2xl space-y-4">
+              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.24em] text-zinc-500">
+                02 / De ce aici
+              </p>
+              <h2 className="text-2xl font-semibold tracking-[-0.03em] text-zinc-900 sm:text-3xl">
+                Mai putin zgomot, mai multa structura.
               </h2>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">
-                Sectiunea prioritara pentru oportunitati care se misca rapid si
-                merita urmarite.
+              <p className="text-sm leading-relaxed text-zinc-600 sm:text-[15px] sm:leading-[1.65]">
+                Nu vindem povesti despre &quot;ecosisteme&quot;. Listarile sunt
+                gandite ca intr-un catalog tehnic: ce e de vanzare, in ce
+                cantitate, la ce pret sau licitatie, cu termene clare.
               </p>
             </div>
-
-            <Button
-              variant="outline"
-              className="h-11 rounded-2xl border-white/15 bg-transparent text-white hover:bg-white/5"
-              asChild
-            >
-              <Link href="/auctions?sort=ending_soon">
-                Vezi toate
-                <ArrowRightIcon className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
+            <p className="max-w-xs font-mono text-[10px] leading-relaxed text-zinc-400 lg:text-right">
+              Patru axe. Fara coloane de text ascunse in spatele unui buton.
+            </p>
           </div>
 
-          <div className="rounded-[30px] border border-white/10 bg-white/[0.03] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:p-4">
+          <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {trustItems.map(({ icon: Icon, label, hint }) => (
+              <li
+                key={label}
+                className="flex flex-col border border-zinc-200 bg-zinc-50/40 p-5 transition-[transform,box-shadow,border-color] duration-200 motion-safe:hover:-translate-y-0.5 motion-safe:hover:border-zinc-300 motion-safe:hover:shadow-md"
+              >
+                <div className="flex items-start gap-4">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center border border-zinc-200 bg-white text-zinc-800">
+                    <Icon className="h-4 w-4" aria-hidden />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-900">
+                      {label}
+                    </p>
+                    <p className="mt-2 text-xs leading-relaxed text-zinc-600">
+                      {hint}
+                    </p>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <Separator className="my-10 bg-zinc-200" />
+          <p className="max-w-3xl text-xs leading-relaxed text-zinc-500">
+            In spate: conturi, cos, finalizare comanda — fluxurile sunt separate
+            de pagina asta. Aici e doar intrarea: vezi ce e disponibil acum si
+            intri in detaliu cand ai nevoie.
+          </p>
+        </div>
+      </section>
+
+      {/* Manifesto band: high-contrast Swiss slab */}
+      <section
+        className="border-b border-zinc-900 bg-zinc-900 py-14 text-zinc-50 sm:py-16 lg:py-20"
+        aria-labelledby="home-manifesto-heading"
+      >
+        <div className="mx-auto grid max-w-7xl gap-10 px-4 sm:px-6 lg:grid-cols-12 lg:gap-12 lg:px-8">
+          <div className="lg:col-span-7">
+            <p
+              id="home-manifesto-heading"
+              className="font-mono text-[10px] font-medium uppercase tracking-[0.24em] text-zinc-500"
+            >
+              Principiu
+            </p>
+            <p className="mt-5 text-balance text-2xl font-medium leading-snug tracking-[-0.03em] text-white sm:text-3xl lg:text-[2rem] lg:leading-tight">
+              In constructii, timpul si claritatea costa. Aici vezi pretul,
+              termenul si starea — fara sa sapi prin paragrafe.
+            </p>
+          </div>
+          <div className="flex flex-col justify-end border-t border-zinc-800 pt-8 font-mono text-[11px] leading-relaxed text-zinc-500 lg:col-span-5 lg:border-t-0 lg:border-l lg:border-zinc-800 lg:pl-10 lg:pt-0">
+            <p>
+              Tranzactii intre profesionisti: licitatii pentru oportunitati,
+              magazin pentru stocuri si livrari repetabile. Aceeasi identitate
+              vizuala pe tot fluxul, ca sa nu pierzi contextul.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* 03 — Auctions */}
+      <section
+        id="live"
+        className="scroll-mt-20 border-b border-zinc-200 bg-zinc-50 py-16 sm:py-20 lg:py-24"
+      >
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mb-12 flex flex-col gap-8 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-xl space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                </span>
+                <p className="font-mono text-[10px] font-medium uppercase tracking-[0.24em] text-zinc-500">
+                  03 / Live
+                </p>
+              </div>
+              <h2 className="text-2xl font-semibold tracking-[-0.03em] text-zinc-900 sm:text-3xl">
+                Licitatii active
+              </h2>
+              <p className="text-sm leading-relaxed text-zinc-600 sm:text-[15px] sm:leading-[1.65]">
+                Selectie scurta: se termina curand. Pentru lista completa si
+                filtre, foloseste pagina de licitatii.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-col items-start gap-3 sm:flex-row sm:items-center lg:flex-col lg:items-end">
+              <p className="font-mono text-[10px] tabular-nums text-zinc-400">
+                Afisate {auctionCount} / max 4
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                asChild
+                className="h-9 rounded-md border-zinc-300 bg-white text-zinc-900"
+              >
+                <Link href="/auctions?sort=ending_soon">
+                  Toate licitatiile
+                  <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                </Link>
+              </Button>
+            </div>
+          </div>
+
+          <div className="border border-zinc-200 bg-white p-4 shadow-sm sm:p-6">
             {endingSoonAuctions.length > 0 ? (
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
                 {endingSoonAuctions.map((auction) => (
                   <div
                     key={auction.id}
-                    className="rounded-[24px] bg-black/10 p-1 transition hover:-translate-y-0.5"
+                    className="transition-transform duration-200 motion-safe:hover:-translate-y-0.5"
                   >
                     <AuctionCard auction={auction} />
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="rounded-[24px] border border-dashed border-white/10 bg-black/10 py-16 text-center">
-                <Gavel className="mx-auto mb-4 h-10 w-10 text-amber-400/60" />
-                <p className="text-sm font-semibold text-white/80">
-                  Nu exista licitatii active momentan
+              <div className="border border-dashed border-zinc-300 bg-zinc-50/80 py-16 text-center">
+                <Gavel className="mx-auto mb-4 h-10 w-10 text-zinc-400" />
+                <p className="text-sm font-medium text-zinc-800">
+                  Nici o licitatie activa in acest moment.
                 </p>
-                <p className="mt-1 text-sm text-slate-400">
-                  Publica prima licitatie si incepe sa aduni interes real.
+                <p className="mt-2 text-xs text-zinc-500">
+                  Primul anunt atrage primul licitator.
                 </p>
+                <Button asChild className="mt-6 rounded-md" size="sm">
+                  <Link href="/sell/auction/new">Publica licitatie</Link>
+                </Button>
               </div>
             )}
           </div>
         </div>
       </section>
 
-      {/* MARKETPLACE */}
-      <section className="border-y border-white/10 bg-[#10161d] py-14 sm:py-16 lg:py-20">
+      {/* 04 — Marketplace */}
+      <section
+        id="magazin"
+        className="scroll-mt-20 border-b border-zinc-200 bg-white py-16 sm:py-20 lg:py-24"
+      >
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-7 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                <Store className="h-3.5 w-3.5 text-amber-400" />
-                <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-white/70">
-                  marketplace
-                </span>
-              </div>
-              <h2 className="text-2xl font-black tracking-[-0.04em] text-white sm:text-3xl lg:text-4xl">
-                Materiale si produse recent listate
+          <div className="mb-12 flex flex-col gap-8 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-xl space-y-4">
+              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.24em] text-zinc-500">
+                04 / Magazin
+              </p>
+              <h2 className="text-2xl font-semibold tracking-[-0.03em] text-zinc-900 sm:text-3xl">
+                Listari recente
               </h2>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">
-                O zona mai curata si mai premium vizual, fara culori care rup
-                identitatea industriala.
+              <p className="text-sm leading-relaxed text-zinc-600 sm:text-[15px] sm:leading-[1.65]">
+                Produse noi sau actualizate. Pentru cautare si categorii, intra
+                in marketplace.
               </p>
             </div>
-
-            <Button
-              variant="outline"
-              className="h-11 rounded-2xl border-white/15 bg-transparent text-white hover:bg-white/5"
-              asChild
-            >
-              <Link href="/marketplace">
-                Vezi marketplace
-                <ArrowRightIcon className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
+            <div className="flex shrink-0 flex-col items-start gap-3 sm:flex-row sm:items-center lg:flex-col lg:items-end">
+              <p className="font-mono text-[10px] tabular-nums text-zinc-400">
+                Afisate {productCount} / max 4
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                asChild
+                className="h-9 rounded-md border-zinc-300 bg-white text-zinc-900"
+              >
+                <Link href="/marketplace">
+                  Deschide magazinul
+                  <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                </Link>
+              </Button>
+            </div>
           </div>
 
-          <div className="rounded-[30px] border border-white/10 bg-black/10 p-3 sm:p-4">
+          <div className="border border-zinc-200 bg-zinc-50/50 p-4 sm:p-6">
             {popularProducts.length > 0 ? (
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
                 {popularProducts.map((product) => (
                   <div
                     key={product.id}
-                    className="rounded-[24px] bg-white/[0.02] p-1 transition hover:-translate-y-0.5"
+                    className="transition-transform duration-200 motion-safe:hover:-translate-y-0.5"
                   >
                     <ProductCard product={product} />
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="rounded-[24px] border border-dashed border-white/10 bg-white/[0.02] py-16 text-center">
-                <Store className="mx-auto mb-4 h-10 w-10 text-amber-400/60" />
-                <p className="text-sm font-semibold text-white/80">
-                  Nu exista produse disponibile momentan
+              <div className="border border-dashed border-zinc-300 bg-white py-16 text-center">
+                <Store className="mx-auto mb-4 h-10 w-10 text-zinc-400" />
+                <p className="text-sm font-medium text-zinc-800">
+                  Inca nu exista produse listate.
                 </p>
-                <p className="mt-1 text-sm text-slate-400">
-                  Adauga produse noi pentru a da greutate paginii.
+                <p className="mt-2 text-xs text-zinc-500">
+                  Un anunt bine facut aduce cereri mai repede.
                 </p>
+                <Button asChild className="mt-6 rounded-md" size="sm">
+                  <Link href="/sell/listing/new">Adauga anunt</Link>
+                </Button>
               </div>
             )}
           </div>
         </div>
       </section>
 
-      {/* SEO / CONTENT */}
-      <section className="bg-[#0a0e13] py-14 sm:py-16 lg:py-20">
+      {/* Closing CTA: two-column Swiss closure */}
+      <section className="bg-zinc-100 py-14 sm:py-16 lg:py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-8 max-w-3xl">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-amber-300">
-              ghiduri utile
-            </p>
-            <h2 className="mt-2 text-2xl font-black tracking-[-0.04em] text-white sm:text-3xl lg:text-4xl">
-              Continut care umple pagina cu sens, nu doar cu decor
-            </h2>
-            <p className="mt-3 text-sm leading-7 text-slate-400 sm:text-base">
-              Aici poti construi in timp o zona puternica pentru SEO si
-              incredere: explicatii simple, bune practici, ghiduri scurte si
-              raspunsuri la intrebarile pe care le are publicul tau.
-            </p>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-              <p className="text-lg font-bold text-white">
-                Cum publici un anunt mai bun
+          <div className="grid gap-10 border border-zinc-200 bg-white p-8 shadow-sm sm:p-10 lg:grid-cols-[1fr_auto] lg:items-center lg:gap-12 lg:p-12">
+            <div className="space-y-4">
+              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.24em] text-zinc-500">
+                Urmatorul pas
               </p>
-              <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
-                <li className="flex gap-3">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                  Titlu clar: produsul, cantitatea si starea.
-                </li>
-                <li className="flex gap-3">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                  Poze reale, curate, fara imagini luate de pe internet.
-                </li>
-                <li className="flex gap-3">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                  Specificatii tehnice si unitate de masura explicate simplu.
-                </li>
-              </ul>
-            </div>
-
-            <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-              <p className="text-lg font-bold text-white">
-                Cum licitezi mai bine
-              </p>
-              <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
-                <li className="flex gap-3">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                  Verifica timpul ramas si pasul minim de licitare.
-                </li>
-                <li className="flex gap-3">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                  Citeste atent descrierea si imaginile inainte sa oferi.
-                </li>
-                <li className="flex gap-3">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                  Stabileste un plafon intern ca sa nu licitezi emotional.
-                </li>
-              </ul>
-            </div>
-
-            <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-              <p className="text-lg font-bold text-white">
-                De ce conteaza designul aici
-              </p>
-              <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
-                <li className="flex gap-3">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                  Utilizatorul trebuie sa ajunga repede la informatia esentiala.
-                </li>
-                <li className="flex gap-3">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                  O identitate mai industriala inspira mai multa coerenta.
-                </li>
-                <li className="flex gap-3">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                  Mobilul cere ierarhie buna, nu decor inutil.
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="mt-8 grid gap-4 lg:grid-cols-2">
-            <div className="rounded-[28px] border border-white/10 bg-[#101720] p-6">
-              <p className="text-lg font-bold text-white">
-                Idei bune de continut pentru viitor
-              </p>
-              <p className="mt-3 text-sm leading-7 text-slate-300">
-                Ghiduri despre materiale de constructii, articole despre
-                preturi, explicatii despre alegerea utilajelor, checklist-uri
-                pentru publicarea anunturilor si FAQ-uri despre licitare.
-              </p>
-              <p className="mt-3 text-sm leading-7 text-slate-400">
-                Aceste zone fac pagina sa para vie chiar si la inceput, iar in
-                timp aduc si valoare SEO reala.
+              <h2 className="text-xl font-semibold tracking-[-0.03em] text-zinc-900 sm:text-2xl">
+                Vinzi surplus sau cumperi pentru santier?
+              </h2>
+              <p className="max-w-lg text-sm leading-relaxed text-zinc-600">
+                Contul e acelasi pentru magazin si licitatii. Alege fluxul care
+                ti se potriveste acum; poti folosi ambele mai tarziu fara alt
+                onboarding.
               </p>
             </div>
-
-            <div className="rounded-[28px] border border-white/10 bg-[#101720] p-6">
-              <p className="text-lg font-bold text-white">
-                Ce expresii merita acoperite natural
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {[
-                  "licitatii constructii",
-                  "materiale constructii",
-                  "utilaje second hand",
-                  "vanzare containere",
-                  "otel beton pret",
-                  "agregate si prefabricate",
-                  "anunturi materiale",
-                  "licitare online",
-                ].map((item) => (
-                  <span
-                    key={item}
-                    className="rounded-full border border-amber-400/20 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100"
-                  >
-                    {item}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* FAQ */}
-      <section className="border-y border-white/10 bg-[#10161d] py-14 sm:py-16 lg:py-20">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="mb-8 max-w-3xl">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-amber-300">
-              faq
-            </p>
-            <h2 className="mt-2 text-2xl font-black tracking-[-0.04em] text-white sm:text-3xl">
-              Intrebari frecvente
-            </h2>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            {[
-              {
-                q: "Pot publica atat produse, cat si licitatii?",
-                a: "Da. Platforma este gandita pentru ambele fluxuri: marketplace si licitatii.",
-              },
-              {
-                q: "Este potrivita pentru firme de constructii?",
-                a: "Da. Accentul este pe materiale, stocuri, utilaje si anunturi relevante pentru domeniu.",
-              },
-              {
-                q: "Se foloseste bine de pe telefon?",
-                a: "Da. Pagina este gandita mobile-first, cu actiuni clare si structurare usor de parcurs.",
-              },
-              {
-                q: "Cum cresc sansele sa vand mai repede?",
-                a: "Cu poze reale, titlu clar, descriere buna si un pret sau pas de licitare coerent.",
-              },
-            ].map((item) => (
-              <div
-                key={item.q}
-                className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+            <div className="flex flex-col gap-3 sm:flex-row lg:flex-col">
+              <Button size="lg" asChild className="h-11 rounded-md px-8 font-semibold">
+                <Link href="/sell/listing/new">Anunt in magazin</Link>
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                asChild
+                className="h-11 rounded-md border-zinc-300 bg-white px-8 font-semibold"
               >
-                <p className="font-bold text-white">{item.q}</p>
-                <p className="mt-2 text-sm leading-7 text-slate-400">
-                  {item.a}
-                </p>
-              </div>
-            ))}
+                <Link href="/register">Creeaza cont</Link>
+              </Button>
+            </div>
           </div>
         </div>
       </section>
-
-      {/* FINAL CTA */}
     </div>
   );
 }

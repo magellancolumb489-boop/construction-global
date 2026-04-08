@@ -256,13 +256,24 @@ export type Database = {
           created_at: string
           currency: string
           description: string | null
+          equipment_condition: string | null
+          equipment_model: string | null
+          equipment_year: number | null
           id: number
           is_active: boolean
+          listing_type: string
           location: string | null
+          min_order_qty: number | null
+          pickup_address: string | null
+          pickup_lat: number | null
+          pickup_lng: number | null
           price: number
           seller_id: string
+          service_area: string | null
           slug: string
           title: string
+          transport_fee: number | null
+          transport_modes: string[] | null
           unit: string
           updated_at: string
         }
@@ -272,13 +283,24 @@ export type Database = {
           created_at?: string
           currency?: string
           description?: string | null
+          equipment_condition?: string | null
+          equipment_model?: string | null
+          equipment_year?: number | null
           id?: never
           is_active?: boolean
+          listing_type?: string
           location?: string | null
+          min_order_qty?: number | null
+          pickup_address?: string | null
+          pickup_lat?: number | null
+          pickup_lng?: number | null
           price: number
           seller_id: string
+          service_area?: string | null
           slug: string
           title: string
+          transport_fee?: number | null
+          transport_modes?: string[] | null
           unit: string
           updated_at?: string
         }
@@ -288,13 +310,24 @@ export type Database = {
           created_at?: string
           currency?: string
           description?: string | null
+          equipment_condition?: string | null
+          equipment_model?: string | null
+          equipment_year?: number | null
           id?: never
           is_active?: boolean
+          listing_type?: string
           location?: string | null
+          min_order_qty?: number | null
+          pickup_address?: string | null
+          pickup_lat?: number | null
+          pickup_lng?: number | null
           price?: number
           seller_id?: string
+          service_area?: string | null
           slug?: string
           title?: string
+          transport_fee?: number | null
+          transport_modes?: string[] | null
           unit?: string
           updated_at?: string
         }

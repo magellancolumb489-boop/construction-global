@@ -1,13 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useId, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ShoppingCart, Package, Minus, Plus, CheckCircle2, Edit, Trash2, Loader2, User as UserIcon, Shield } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ArrowRight, Package, Edit, Trash2, Loader2, User as UserIcon, Shield, ShoppingCart } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -16,8 +16,10 @@ import {
 import { GalleryCarousel } from "@/components/shared/gallery-carousel"
 import { MoneyDisplay } from "@/components/shared/money-display"
 import { ProductCard } from "@/components/shared/product-card"
+import { saveConfigureDraft } from "@/lib/configure-draft"
 import { useCart } from "@/lib/cart-context"
 import { deleteListing } from "@/lib/api/listings-client"
+import { useToast } from "@/hooks/use-toast"
 import type { ProductDetail, ProductListItem } from "@/types/domain"
 
 interface ProductDetailClientProps {
@@ -27,27 +29,164 @@ interface ProductDetailClientProps {
   relatedProducts?: ProductListItem[]
 }
 
-export function ProductDetailClient({ product, isOwner = false, listingId, relatedProducts = [] }: ProductDetailClientProps) {
-  const { addItem } = useCart()
-  const router = useRouter()
-  const [qty, setQty] = useState(1)
-  const [added, setAdded] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+/** Stock / availability line — wording differs for equipment and services. */
+function StockBadge({ product }: { product: ProductDetail }) {
+  if (product.availableQty <= 0) {
+    return <Badge variant="destructive" className="rounded-lg">Indisponibil</Badge>
+  }
+  if (product.listingKind === "equipment") {
+    return (
+      <Badge className="rounded-lg bg-slate-500/10 text-slate-800 border-slate-200">
+        Un singur obiect disponibil
+      </Badge>
+    )
+  }
+  if (product.listingKind === "services") {
+    return (
+      <Badge className="rounded-lg bg-violet-500/10 text-violet-800 border-violet-200">
+        Serviciu
+      </Badge>
+    )
+  }
+  return (
+    <Badge className="rounded-lg bg-emerald-500/10 text-emerald-700 border-emerald-200">
+      In stoc: {product.availableQty.toLocaleString("ro-RO")} {product.unit}
+    </Badge>
+  )
+}
 
-  function handleAdd() {
+/**
+ * CTA: concrete listings use calculator configurare; other kinds add a simple line to the cart
+ * with optional fixed transport fee.
+ */
+function ProductPurchaseBlock({
+  product,
+  qty,
+  onQtyChange,
+}: {
+  product: ProductDetail
+  qty: number
+  onQtyChange: (n: number) => void
+}) {
+  const router = useRouter()
+  const { addItem } = useCart()
+  const { toast } = useToast()
+  const qtyFieldId = useId()
+
+  const isConcrete = product.listingKind === "concrete"
+  const allowQty = product.listingKind === "materials"
+  const maxQ = Math.max(1, product.availableQty)
+
+  function handleContinueToConfigure() {
+    saveConfigureDraft(product, 1)
+    router.push("/cart/configurare")
+  }
+
+  function handleAddToCart() {
+    const q = allowQty ? Math.min(Math.max(1, qty), maxQ) : 1
     addItem({
       productId: product.id,
       name: product.name,
       price: product.price,
       unit: product.unit,
       currency: product.currency,
-      qty,
+      qty: q,
       availableQty: product.availableQty,
-      thumbnailUrl: product.thumbnailUrl,
+      thumbnailUrl: product.images[0] ?? "",
+      transportFee:
+        product.transportFee != null && product.transportFee > 0
+          ? product.transportFee
+          : undefined,
+      configurationRequired: false,
+      configurationComplete: true,
     })
-    setAdded(true)
-    setTimeout(() => setAdded(false), 2000)
+    toast({
+      title: "Adaugat in cos",
+      description: "Puteti continua cumparaturile sau finaliza comanda.",
+    })
   }
+
+  if (isConcrete) {
+    return (
+      <div className="space-y-2">
+        <Button
+          className="h-12 w-full rounded-2xl bg-foreground text-base font-bold text-background shadow-md hover:bg-foreground/90 active:scale-[0.98] transition-all"
+          onClick={handleContinueToConfigure}
+          disabled={product.availableQty === 0}
+        >
+          Continua la configurare
+          <ArrowRight className="ml-2 h-5 w-5" />
+        </Button>
+        <p className="text-center text-[11px] text-muted-foreground leading-snug px-1">
+          Cantitatea, TVA-ul, transportul si oferta finala se stabilesc in calculator si in cos,
+          inainte de comanda.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {allowQty && product.availableQty > 0 && (
+        <div className="flex items-end gap-3">
+          <div className="flex-1">
+            <Label htmlFor={qtyFieldId} className="text-xs text-muted-foreground">
+              Cantitate
+            </Label>
+            <Input
+              id={qtyFieldId}
+              type="number"
+              min={1}
+              max={maxQ}
+              value={qty}
+              onChange={(e) =>
+                onQtyChange(Math.max(1, Math.min(maxQ, Number(e.target.value) || 1)))
+              }
+              className="mt-1 h-11 rounded-xl"
+            />
+          </div>
+        </div>
+      )}
+      {product.transportFee != null && product.transportFee > 0 && (
+        <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+          Transport fix adaugat o data la linie:{" "}
+          <MoneyDisplay
+            amount={product.transportFee}
+            currency={product.currency}
+            className="inline font-semibold text-foreground"
+          />
+        </p>
+      )}
+      {product.serviceArea && (
+        <p className="text-xs text-muted-foreground">
+          Zona: {product.serviceArea}
+        </p>
+      )}
+      <Button
+        className="h-12 w-full rounded-2xl bg-foreground text-base font-bold text-background shadow-md hover:bg-foreground/90 active:scale-[0.98] transition-all"
+        onClick={handleAddToCart}
+        disabled={product.availableQty === 0}
+      >
+        <ShoppingCart className="mr-2 h-5 w-5" />
+        Adauga in cos
+      </Button>
+      <Button variant="outline" className="h-11 w-full rounded-2xl" asChild>
+        <Link href="/cart">Vezi cosul</Link>
+      </Button>
+    </div>
+  )
+}
+
+export function ProductDetailClient({
+  product,
+  isOwner = false,
+  listingId,
+  relatedProducts = [],
+}: ProductDetailClientProps) {
+  const router = useRouter()
+  const [deleting, setDeleting] = useState(false)
+  /** Shared between mobile and desktop purchase panels (only one visible per breakpoint). */
+  const [purchaseQty, setPurchaseQty] = useState(1)
 
   async function handleDelete() {
     if (!listingId) return
@@ -63,7 +202,6 @@ export function ProductDetailClient({ product, isOwner = false, listingId, relat
 
   return (
     <div className="space-y-6">
-      {/* Owner toolbar */}
       {isOwner && listingId && (
         <div className="flex flex-col gap-2 rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:flex-row sm:items-center">
           <div className="flex items-center gap-2">
@@ -101,11 +239,9 @@ export function ProductDetailClient({ product, isOwner = false, listingId, relat
       )}
 
       <div className="grid gap-6 lg:grid-cols-3 lg:gap-8">
-        {/* Left - Gallery + Description */}
         <div className="lg:col-span-2 space-y-6">
           <GalleryCarousel images={product.images} />
 
-          {/* Mobile price + add to cart -- visible on small screens only */}
           <div className="rounded-2xl border border-border/50 bg-card p-5 lg:hidden">
             <h2 className="mb-3 text-xl font-extrabold text-foreground">{product.name}</h2>
             <div className="mb-4 flex items-baseline gap-2 rounded-xl bg-primary/10 px-4 py-3 ring-1 ring-primary/20">
@@ -118,53 +254,14 @@ export function ProductDetailClient({ product, isOwner = false, listingId, relat
             </div>
             <div className="mb-4 flex items-center gap-2">
               <Package className="h-4 w-4 text-muted-foreground" />
-              {product.availableQty > 0 ? (
-                <Badge className="rounded-lg bg-emerald-500/10 text-emerald-700 border-emerald-200">
-                  In stoc: {product.availableQty.toLocaleString("ro-RO")} {product.unit}
-                </Badge>
-              ) : (
-                <Badge variant="destructive" className="rounded-lg">Indisponibil</Badge>
-              )}
+              <StockBadge product={product} />
             </div>
-
-            {/* Qty */}
-            <div className="mb-4">
-              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">Cantitate ({product.unit})</p>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="icon" className="h-11 w-11 rounded-xl" onClick={() => setQty((q) => Math.max(1, q - 1))} disabled={qty <= 1}>
-                  <Minus className="h-4 w-4" />
-                </Button>
-                <Input
-                  type="number" min={1} max={product.availableQty} value={qty}
-                  onChange={(e) => setQty(Math.max(1, Math.min(product.availableQty, Number(e.target.value) || 1)))}
-                  className="h-11 w-20 rounded-xl text-center text-lg font-bold"
-                />
-                <Button variant="outline" size="icon" className="h-11 w-11 rounded-xl" onClick={() => setQty((q) => Math.min(product.availableQty, q + 1))} disabled={qty >= product.availableQty}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-
-            <div className="mb-4 flex items-center justify-between rounded-xl bg-muted/50 px-4 py-3">
-              <span className="text-sm text-muted-foreground">Subtotal</span>
-              <MoneyDisplay amount={product.price * qty} currency={product.currency} className="text-lg font-extrabold text-foreground" />
-            </div>
-
             {!isOwner && (
-              added ? (
-                <div className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-50 text-sm font-medium text-emerald-700 dark:bg-emerald-950/30">
-                  <CheckCircle2 className="h-4 w-4" /> Adaugat in cos!
-                </div>
-              ) : (
-                <Button
-                  className="h-12 w-full rounded-2xl bg-foreground text-base font-bold text-background shadow-md hover:bg-foreground/90 active:scale-[0.98] transition-all"
-                  onClick={handleAdd}
-                  disabled={product.availableQty === 0}
-                >
-                  <ShoppingCart className="mr-2 h-5 w-5" />
-                  Adauga in cos
-                </Button>
-              )
+              <ProductPurchaseBlock
+                product={product}
+                qty={purchaseQty}
+                onQtyChange={setPurchaseQty}
+              />
             )}
           </div>
 
@@ -174,7 +271,6 @@ export function ProductDetailClient({ product, isOwner = false, listingId, relat
           </div>
         </div>
 
-        {/* Right - Price + Cart -- desktop sticky, hidden on mobile */}
         <div className="hidden space-y-4 lg:block lg:sticky lg:top-20 lg:self-start">
           <div className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm">
             <h2 className="mb-4 text-xl font-extrabold text-foreground">{product.name}</h2>
@@ -190,53 +286,15 @@ export function ProductDetailClient({ product, isOwner = false, listingId, relat
 
             <div className="mb-4 flex items-center gap-2">
               <Package className="h-4 w-4 text-muted-foreground" />
-              {product.availableQty > 0 ? (
-                <Badge className="rounded-lg bg-emerald-500/10 text-emerald-700 border-emerald-200">
-                  In stoc: {product.availableQty.toLocaleString("ro-RO")} {product.unit}
-                </Badge>
-              ) : (
-                <Badge variant="destructive" className="rounded-lg">Indisponibil</Badge>
-              )}
-            </div>
-
-            {/* Qty */}
-            <div className="mb-4">
-              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">Cantitate ({product.unit})</p>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl" onClick={() => setQty((q) => Math.max(1, q - 1))} disabled={qty <= 1}>
-                  <Minus className="h-4 w-4" />
-                </Button>
-                <Input
-                  type="number" min={1} max={product.availableQty} value={qty}
-                  onChange={(e) => setQty(Math.max(1, Math.min(product.availableQty, Number(e.target.value) || 1)))}
-                  className="h-10 w-20 rounded-xl text-center text-lg font-bold"
-                />
-                <Button variant="outline" size="icon" className="h-10 w-10 rounded-xl" onClick={() => setQty((q) => Math.min(product.availableQty, q + 1))} disabled={qty >= product.availableQty}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-
-            <div className="mb-4 flex items-center justify-between rounded-xl bg-muted/50 px-4 py-3">
-              <span className="text-sm text-muted-foreground">Subtotal</span>
-              <MoneyDisplay amount={product.price * qty} currency={product.currency} className="text-lg font-extrabold text-foreground" />
+              <StockBadge product={product} />
             </div>
 
             {!isOwner && (
-              added ? (
-                <div className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-50 text-sm font-medium text-emerald-700 dark:bg-emerald-950/30">
-                  <CheckCircle2 className="h-4 w-4" /> Adaugat in cos!
-                </div>
-              ) : (
-                <Button
-                  className="h-12 w-full rounded-2xl bg-foreground text-base font-bold text-background shadow-md hover:bg-foreground/90 active:scale-[0.98] transition-all"
-                  onClick={handleAdd}
-                  disabled={product.availableQty === 0}
-                >
-                  <ShoppingCart className="mr-2 h-5 w-5" />
-                  Adauga in cos
-                </Button>
-              )
+              <ProductPurchaseBlock
+                product={product}
+                qty={purchaseQty}
+                onQtyChange={setPurchaseQty}
+              />
             )}
 
             <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -247,7 +305,6 @@ export function ProductDetailClient({ product, isOwner = false, listingId, relat
         </div>
       </div>
 
-      {/* Related products */}
       {relatedProducts.length > 0 && (
         <section className="border-t border-border/50 pt-8">
           <div className="mb-5 flex items-center justify-between">

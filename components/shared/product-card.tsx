@@ -2,36 +2,16 @@
 
 import Link from "next/link"
 import Image from "next/image"
-import { ShoppingCart, Package, CheckCircle2 } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Package, ArrowRight } from "lucide-react"
 import { MoneyDisplay } from "./money-display"
-import { useCart } from "@/lib/cart-context"
-import { useState } from "react"
 import type { ProductListItem } from "@/types/domain"
 
 export function ProductCard({ product }: { product: ProductListItem }) {
-  const { addItem } = useCart()
-  const [added, setAdded] = useState(false)
-
-  function handleAdd(e: React.MouseEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    addItem({
-      productId: product.id,
-      name: product.name,
-      price: product.price,
-      unit: product.unit,
-      currency: product.currency,
-      qty: 1,
-      availableQty: product.availableQty,
-      thumbnailUrl: product.thumbnailUrl,
-    })
-    setAdded(true)
-    setTimeout(() => setAdded(false), 1500)
-  }
+  const href = `/products/${product.slug}-${product.id}`
+  const ctaLabel = product.listingKind === "concrete" ? "Configurare" : "Detalii"
 
   return (
-    <Link href={`/products/${product.slug}-${product.id}`} className="group block">
+    <Link href={href} className="group block">
       <div className="overflow-hidden rounded-2xl border border-border/50 bg-card shadow-sm transition-all duration-300 hover:shadow-xl hover:border-primary/20 hover:-translate-y-1">
         {/* Image */}
         <div className="relative aspect-4/3 overflow-hidden">
@@ -69,21 +49,10 @@ export function ProductCard({ product }: { product: ProductListItem }) {
             />
             <span className="text-xs text-muted-foreground">/ {product.unit}</span>
           </div>
-          {added ? (
-            <div className="flex h-9 items-center justify-center gap-1.5 rounded-xl bg-emerald-50 text-sm font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
-              <CheckCircle2 className="h-4 w-4" />
-              Adaugat!
-            </div>
-          ) : (
-            <Button
-              size="sm"
-              className="h-9 w-full rounded-xl bg-foreground text-sm font-semibold text-background shadow-sm hover:bg-foreground/90 active:scale-[0.98] transition-all"
-              onClick={handleAdd}
-            >
-              <ShoppingCart className="mr-1.5 h-3.5 w-3.5" />
-              Adauga in cos
-            </Button>
-          )}
+          <div className="flex h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-secondary text-sm font-semibold text-secondary-foreground shadow-sm">
+            {ctaLabel}
+            <ArrowRight className="h-3.5 w-3.5" />
+          </div>
         </div>
       </div>
     </Link>
