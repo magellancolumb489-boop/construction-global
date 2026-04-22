@@ -1,6 +1,12 @@
 import { createClient } from "@/lib/supabase/client"
 import type { Tables, TablesInsert, TablesUpdate } from "@/types/supabase"
 import type { AuctionListItem, AuctionDetail, AuctionStatus, BidRow, Currency } from "@/types/domain"
+import { bidInputSchema } from "@/lib/validation"
+import {
+  createAuctionAction,
+  updateAuctionAction,
+  deleteAuctionAction,
+} from "@/app/sell/auction/actions"
 
 export type AuctionLot = Tables<"auction_lots">
 export type AuctionLotInsert = Omit<TablesInsert<"auction_lots">, "id" | "created_at" | "updated_at">
@@ -22,7 +28,7 @@ function maskBidder(displayName: string | null, bidderId: string): string {
   return `Ofertant ${bidderId.substring(0, 4)}`
 }
 
-// Client-side: fetch auctions with filters (used by auctions-content.tsx on filter change)
+// Client-side: fetch auctions with filters (read-only, public)
 export async function getAuctionsFiltered(filters: {
   status?: AuctionStatus
   categoryId?: number
@@ -101,72 +107,74 @@ export async function getAuctionsFiltered(filters: {
   return { items, total: count ?? 0 }
 }
 
-// Client-side: create a new auction lot
+// createAuction: thin wrapper around server action. seller_id is injected
+// server-side. current_price / bid_count / current_winner_id are ignored if
+// provided by the client.
 export async function createAuction(
   lot: AuctionLotInsert
 ): Promise<{ success: boolean; data?: AuctionLot; error?: string }> {
-  const supabase = createClient()
-  const { data, error } = await supabase
-    .from("auction_lots")
-    .insert(lot)
-    .select()
-    .single()
-
-  if (error) return { success: false, error: error.message }
-  return { success: true, data }
+  const res = await createAuctionAction(
+    lot as unknown as Parameters<typeof createAuctionAction>[0]
+  )
+  if (res.success) return { success: true, data: res.data as AuctionLot }
+  return { success: false, error: res.error }
 }
 
-// Client-side: update an existing auction lot (owner only via RLS)
 export async function updateAuction(
   id: number,
   updates: AuctionLotUpdate
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = createClient()
-  const { error } = await supabase
-    .from("auction_lots")
-    .update(updates)
-    .eq("id", id)
-
-  if (error) return { success: false, error: error.message }
-  return { success: true }
+  const res = await updateAuctionAction(
+    id,
+    updates as unknown as Parameters<typeof updateAuctionAction>[1]
+  )
+  return res.success ? { success: true } : { success: false, error: res.error }
 }
 
-// Client-side: delete an auction lot (owner only via RLS, cascades images)
 export async function deleteAuction(
   id: number
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = createClient()
-  const { error } = await supabase
-    .from("auction_lots")
-    .delete()
-    .eq("id", id)
-
-  if (error) return { success: false, error: error.message }
-  return { success: true }
+  const res = await deleteAuctionAction(id)
+  return res.success ? { success: true } : { success: false, error: res.error }
 }
 
-// Client-side: place a bid using the existing DB RPC
+// placeAuctionBid: stays client-side; the DB RPC is the authoritative guard.
+// We Zod-validate the input locally first to surface obvious errors early.
 export async function placeAuctionBid(
   lotId: number,
   amount: number
 ): Promise<{ success: boolean; error?: string }> {
+  const parsed = bidInputSchema.safeParse({ lot_id: lotId, amount })
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? "Suma invalida" }
+  }
+
   const supabase = createClient()
   const { data, error } = await supabase.rpc("place_bid", {
-    p_lot_id: lotId,
-    p_amount: amount,
+    p_lot_id: parsed.data.lot_id,
+    p_amount: parsed.data.amount,
   })
 
   if (error) return { success: false, error: error.message }
 
-  // The RPC may return a JSON object with success/error
-  if (data && typeof data === "object" && "error" in data) {
-    return { success: false, error: String((data as Record<string, unknown>).error) }
+  if (data && typeof data === "object") {
+    const payload = data as { ok?: boolean; error?: string; min_next?: number }
+    if (payload.ok === false) {
+      if (payload.error === "below_min_bid" && payload.min_next != null) {
+        return {
+          success: false,
+          error: `Oferta este sub minimul permis (min: ${payload.min_next}).`,
+        }
+      }
+      return { success: false, error: payload.error ?? "Oferta respinsa" }
+    }
   }
 
   return { success: true }
 }
 
-// Client-side: upload an image to Storage and insert a reference row
+// Image upload stays client-side; storage RLS forces the owner prefix and
+// the DB row insert is gated by auction_images RLS (lot-owner join).
 export async function uploadAuctionImage(
   lotId: number,
   file: File,
@@ -174,7 +182,9 @@ export async function uploadAuctionImage(
   isCover: boolean = false
 ): Promise<{ success: boolean; path?: string; error?: string }> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) return { success: false, error: "Not authenticated" }
 
   const storagePath = `${user.id}/${lotId}/${Date.now()}-${file.name}`
@@ -198,7 +208,6 @@ export async function uploadAuctionImage(
   return { success: true, path: storagePath }
 }
 
-// Client-side: delete an image from Storage and its DB row
 export async function deleteAuctionImage(
   imageId: number,
   storagePath: string
@@ -220,7 +229,6 @@ export async function deleteAuctionImage(
   return { success: true }
 }
 
-// Client-side: check if an auction slug is available
 export async function checkAuctionSlugAvailable(slug: string): Promise<boolean> {
   const supabase = createClient()
   const { count } = await supabase
@@ -230,7 +238,7 @@ export async function checkAuctionSlugAvailable(slug: string): Promise<boolean> 
   return (count ?? 0) === 0
 }
 
-// Client-side: poll fresh data for an auction (used by useAuctionPoll hook)
+// Polling: read-only; selects only public-safe display_name via joins.
 export async function pollAuctionData(lotId: number): Promise<{
   auction: AuctionDetail | null
   bids: BidRow[]
@@ -275,7 +283,6 @@ export async function pollAuctionData(lotId: number): Promise<{
     winnerId: row.current_winner_id ?? undefined,
   }
 
-  // Fetch recent bids
   const { data: bidsData } = await supabase
     .from("auction_bids")
     .select("*, profiles!auction_bids_bidder_id_fkey(display_name)")
@@ -295,7 +302,6 @@ export async function pollAuctionData(lotId: number): Promise<{
   return { auction, bids }
 }
 
-// Helper: get the public URL for a stored auction image path
 export function getAuctionImagePublicUrl(storagePath: string): string {
   return storagePublicUrl(storagePath)
 }

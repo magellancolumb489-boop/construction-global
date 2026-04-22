@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/toaster"
 import { SiteHeader } from "@/components/layout/header"
 import { SiteFooter } from "@/components/layout/footer"
 import { createClient } from "@/lib/supabase/server"
+import { getMyWishlistCount } from "@/lib/api/notification-prefs"
 import "./globals.css"
 
 const _inter = Inter({ subsets: ["latin", "latin-ext"] })
@@ -23,6 +24,8 @@ export default async function RootLayout({
 }>) {
   // Resilient auth: if Supabase fails (missing env, network, etc.), app still loads with null user
   let initialUser: { email: string; displayName: string } | null = null
+  let isAdmin = false
+  let wishlistCount = 0
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -30,6 +33,19 @@ export default async function RootLayout({
       initialUser = {
         email: user.email ?? "",
         displayName: user.user_metadata?.display_name ?? "",
+      }
+      // Role lookup is a tiny query; a miss keeps isAdmin false and hides the admin link in the header
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle()
+      isAdmin = profile?.role === "admin"
+      // Wishlist badge count for the header. Cheap head:true query.
+      try {
+        wishlistCount = await getMyWishlistCount()
+      } catch (err) {
+        console.error("[RootLayout] wishlist count failed:", err instanceof Error ? err.message : err)
       }
     }
   } catch (err) {
@@ -42,7 +58,7 @@ export default async function RootLayout({
       <body className="font-sans antialiased">
         <CartProvider>
           <div className="flex min-h-screen flex-col">
-            <SiteHeader initialUser={initialUser} />
+            <SiteHeader initialUser={initialUser} isAdmin={isAdmin} wishlistCount={wishlistCount} />
             <main className="flex-1">{children}</main>
             <SiteFooter />
           </div>

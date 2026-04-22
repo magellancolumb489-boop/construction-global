@@ -1,51 +1,33 @@
-"use client"
+import { notFound } from "next/navigation"
+import { createClient } from "@/lib/supabase/server"
+import { AdminNav } from "./admin-nav"
 
-import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { cn } from "@/lib/utils"
-import { LayoutDashboard, Gavel, ShoppingBag, Users, CreditCard, ArrowLeft } from "lucide-react"
+// Hard admin gate. Any non-admin (including anonymous) gets a 404 to avoid
+// leaking the existence of /admin. The layout is a server component so the
+// check happens before any child UI renders.
+export default async function AdminLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
-const navItems = [
-  { href: "/admin", label: "Prezentare Generala", icon: LayoutDashboard },
-  { href: "/admin/auctions", label: "Licitatii", icon: Gavel },
-  { href: "/admin/orders", label: "Comenzi", icon: ShoppingBag },
-  { href: "/admin/users", label: "Utilizatori", icon: Users },
-  { href: "/admin/payments", label: "Plati", icon: CreditCard },
-]
+  if (!user) notFound()
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname()
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle()
+
+  if (error || profile?.role !== "admin") notFound()
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)]">
-      <aside className="w-64 border-r border-border bg-secondary text-secondary-foreground">
-        <div className="p-4">
-          <Link href="/" className="mb-6 inline-flex items-center gap-1 text-xs text-secondary-foreground/60 hover:text-secondary-foreground">
-            <ArrowLeft className="h-3 w-3" /> Inapoi la site
-          </Link>
-          <h2 className="mb-6 text-lg font-bold">Admin Panel</h2>
-          <nav className="space-y-1">
-            {navItems.map((item) => {
-              const isActive = pathname === item.href || (item.href !== "/admin" && pathname.startsWith(item.href))
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                    isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-secondary-foreground/70 hover:bg-secondary-foreground/10 hover:text-secondary-foreground"
-                  )}
-                >
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
-                </Link>
-              )
-            })}
-          </nav>
-        </div>
-      </aside>
+      <AdminNav />
       <div className="flex-1 overflow-auto p-6">{children}</div>
     </div>
   )

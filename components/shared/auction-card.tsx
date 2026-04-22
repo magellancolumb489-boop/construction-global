@@ -4,11 +4,18 @@ import { Tag, Users, Zap, Clock } from "lucide-react"
 import { StatusBadge } from "./status-badge"
 import { MoneyDisplay } from "./money-display"
 import { CountdownTimer } from "./countdown-timer"
+import { WishlistToggle } from "./wishlist-toggle"
 import type { AuctionListItem } from "@/types/domain"
 
 export function AuctionCard({ auction }: { auction: AuctionListItem }) {
   return (
-    <Link href={`/auctions/${auction.slug}-${auction.id}`} className="group block">
+    <Link href={`/auctions/${auction.slug}-${auction.id}`} className="group relative block">
+      <WishlistToggle
+        target={{ kind: "auction", auction_id: Number(auction.id) }}
+        className={
+          auction.reservePrice ? "absolute right-3 top-14" : "absolute right-3 top-3"
+        }
+      />
       <div className="overflow-hidden rounded-2xl border border-border/50 bg-card shadow-sm transition-all duration-300 hover:shadow-xl hover:border-primary/20 hover:-translate-y-1">
         {/* Image */}
         <div className="relative aspect-16/10 overflow-hidden">

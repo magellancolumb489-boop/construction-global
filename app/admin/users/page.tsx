@@ -10,7 +10,9 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { getAdminUsers, changeUserRole } from "@/lib/api/admin"
+import { getAdminUsers } from "@/lib/api/admin"
+import { changeUserRoleAction } from "@/app/admin/actions"
+import { useToast } from "@/hooks/use-toast"
 import type { User, UserRole } from "@/types/domain"
 import { Search } from "lucide-react"
 
@@ -28,6 +30,7 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
+  const { toast } = useToast()
 
   useEffect(() => {
     getAdminUsers().then((u) => { setUsers(u); setLoading(false) })
@@ -39,8 +42,14 @@ export default function AdminUsersPage() {
   )
 
   async function handleRoleChange(userId: string, role: UserRole) {
-    await changeUserRole(userId, role)
+    // Optimistic UI update with rollback on failure
+    const prevUsers = users
     setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, role } : u))
+    const result = await changeUserRoleAction(userId, role)
+    if (!result.success) {
+      setUsers(prevUsers)
+      toast({ title: "Rol neschimbat", description: result.error, variant: "destructive" })
+    }
   }
 
   return (

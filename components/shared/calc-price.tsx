@@ -1,9 +1,25 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, {
+  useState,
+  useMemo,
+  useEffect,
+  useRef,
+  useCallback,
+} from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import type { ProductDetail, ProductUnit } from "@/types/domain";
+import { AddressAutocomplete } from "@/components/shared/address-autocomplete";
+import { RouteMap } from "@/components/shared/route-map";
+import {
+  computeRoute,
+  geocodeOne,
+  RoutingError,
+  type GeocodeResult,
+  type LatLng,
+  type RouteResult,
+} from "@/lib/api/routing";
 
 // ============================================================
 // SECTION 1: SCHEMA-ALIGNED TYPE DEFINITIONS
@@ -1979,8 +1995,32 @@ export default function PriceCalculator({
   // Common
   const [vatRate, setVatRate] = useState<string>("19");
 
-  // Mock delivery address
+  // Delivery address text + geocoded coords. `deliveryCoords` is only set
+  // once the user selects an autocomplete suggestion; free-text edits clear it.
   const [deliveryAddress, setDeliveryAddress] = useState<string>("");
+  const [deliveryCoords, setDeliveryCoords] = useState<LatLng | null>(null);
+
+  // Origin (supplier pickup) coords. Prefer `initialProduct.pickupLat/Lng`
+  // in flow mode; otherwise fall back to geocoding the listing's free-text
+  // location once, cached per listing id.
+  const [originCoords, setOriginCoords] = useState<LatLng | null>(null);
+  const originCacheRef = useRef<Map<string, LatLng | null>>(new Map());
+
+  // Computed route between origin and delivery. Loading / error mirror the
+  // async fetch; routeResult holds distanceKm + durationMin + geometry.
+  const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
+  const [routeLoading, setRouteLoading] = useState<boolean>(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
+
+  // Per-calc-type flag: once the user manually edits the distance field,
+  // the auto-fill stops overwriting until they hit "Restabileste".
+  const distanceTouchedRef = useRef<Record<CalculatorType, boolean>>({
+    CIFA: false,
+    POMPA: false,
+    VRAC: false,
+    DEPOZIT: false,
+  });
+
 
   // Cifa fields
   const [cifaQtyMc, setCifaQtyMc] = useState<string>("14");
@@ -2028,6 +2068,22 @@ export default function PriceCalculator({
     }
   }, [mode, initialProduct, initialQty]);
 
+  // Manual-distance handlers: record "user touched" so the route auto-fill
+  // will not clobber their edits until Restabileste is pressed. The raw
+  // setters remain available for the effect below to push auto values.
+  const handleCifaDistChange = useCallback((v: string) => {
+    distanceTouchedRef.current.CIFA = true;
+    setCifaDistKm(v);
+  }, []);
+  const handlePompaDistChange = useCallback((v: string) => {
+    distanceTouchedRef.current.POMPA = true;
+    setPompaDistKm(v);
+  }, []);
+  const handleVracDistChange = useCallback((v: string) => {
+    distanceTouchedRef.current.VRAC = true;
+    setVracDistKm(v);
+  }, []);
+
   // Derived: active listings
   const activeListings = useMemo(() => {
     const list = validationDataSource?.listings ?? [];
@@ -2051,6 +2107,166 @@ export default function PriceCalculator({
     const fromProfile = selectedSupplier?.display_name?.trim();
     return fromProduct || fromProfile || "Furnizor";
   }, [initialProduct, selectedSupplier]);
+
+  // Origin resolution: as soon as a listing is selected, try the seller's
+  // precise pickup coords; if absent, fall back to a single-shot Nominatim
+  // call on the free-text location. Results are cached per listing id so
+  // re-selecting the same material doesn't re-hit the proxy.
+  useEffect(() => {
+    let cancelled = false;
+    setOriginCoords(null);
+    if (!selectedListing) return;
+
+    const listingId = selectedListing.id;
+    const cached = originCacheRef.current.get(listingId);
+    if (cached !== undefined) {
+      setOriginCoords(cached);
+      return;
+    }
+
+    const fromProduct =
+      mode === "flow" && initialProduct && initialProduct.id === listingId
+        ? initialProduct
+        : null;
+
+    if (
+      fromProduct &&
+      typeof fromProduct.pickupLat === "number" &&
+      typeof fromProduct.pickupLng === "number"
+    ) {
+      const coords: LatLng = {
+        lat: fromProduct.pickupLat,
+        lng: fromProduct.pickupLng,
+      };
+      originCacheRef.current.set(listingId, coords);
+      setOriginCoords(coords);
+      return;
+    }
+
+    const location = selectedListing.location?.trim();
+    if (!location || location === "—") {
+      originCacheRef.current.set(listingId, null);
+      return;
+    }
+
+    (async () => {
+      try {
+        const result = await geocodeOne(location);
+        if (cancelled) return;
+        const coords: LatLng | null = result
+          ? { lat: result.lat, lng: result.lng }
+          : null;
+        originCacheRef.current.set(listingId, coords);
+        setOriginCoords(coords);
+      } catch {
+        if (cancelled) return;
+        // Silent fallback: manual distance input still works.
+        originCacheRef.current.set(listingId, null);
+        setOriginCoords(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedListing, mode, initialProduct]);
+
+  // Reset computed route & distanceTouched whenever the selected listing
+  // changes. Keeps auto-fill fresh per material.
+  useEffect(() => {
+    setRouteResult(null);
+    setRouteError(null);
+    distanceTouchedRef.current = {
+      CIFA: false,
+      POMPA: false,
+      VRAC: false,
+      DEPOZIT: false,
+    };
+  }, [selectedListingId]);
+
+  // Route computation: triggers when both endpoints are known. On success
+  // we push the one-way distance into whichever calc-type field has not
+  // been manually touched since the last compute. VRAC uses the figure
+  // as a commercial distance (single-leg), so same behavior works.
+  useEffect(() => {
+    if (!originCoords || !deliveryCoords) {
+      setRouteResult(null);
+      setRouteError(null);
+      setRouteLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+    setRouteLoading(true);
+    setRouteError(null);
+
+    (async () => {
+      try {
+        const result = await computeRoute(
+          originCoords,
+          deliveryCoords,
+          controller.signal,
+        );
+        if (cancelled) return;
+        setRouteResult(result);
+        const km = result.distanceKm.toFixed(1);
+        if (!distanceTouchedRef.current.CIFA) setCifaDistKm(km);
+        if (!distanceTouchedRef.current.POMPA) setPompaDistKm(km);
+        if (!distanceTouchedRef.current.VRAC) setVracDistKm(km);
+      } catch (err) {
+        if (cancelled) return;
+        if ((err as { name?: string }).name === "AbortError") return;
+        const msg =
+          err instanceof RoutingError
+            ? err.message
+            : "Nu am putut calcula ruta.";
+        setRouteError(msg);
+      } finally {
+        if (!cancelled) setRouteLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [originCoords, deliveryCoords]);
+
+  // "Restabileste": re-apply the last computed value into the active
+  // calc-type field and clear its touched flag so future routes auto-fill
+  // it again.
+  const handleRestoreAutoDistance = useCallback(() => {
+    if (!routeResult) return;
+    const km = routeResult.distanceKm.toFixed(1);
+    if (calcType === "CIFA") {
+      distanceTouchedRef.current.CIFA = false;
+      setCifaDistKm(km);
+    } else if (calcType === "POMPA") {
+      distanceTouchedRef.current.POMPA = false;
+      setPompaDistKm(km);
+    } else if (calcType === "VRAC") {
+      distanceTouchedRef.current.VRAC = false;
+      setVracDistKm(km);
+    }
+  }, [routeResult, calcType]);
+
+  // Address-select handler: store the chosen suggestion's coords (or clear
+  // on free-text edits). When cleared we also drop the current route so
+  // stale data doesn't display.
+  const handleDeliveryAddressChange = useCallback(
+    (value: string, coords: GeocodeResult | null) => {
+      setDeliveryAddress(value);
+      if (coords) {
+        setDeliveryCoords({ lat: coords.lat, lng: coords.lng });
+      } else {
+        setDeliveryCoords(null);
+        setRouteResult(null);
+        setRouteError(null);
+      }
+    },
+    [],
+  );
 
   const selectedCategory = useMemo(
     () =>
@@ -2673,7 +2889,7 @@ export default function PriceCalculator({
                   </div>
                 </div>
 
-                {/* Destination */}
+                {/* Destination: real geocoding autocomplete (Nominatim) */}
                 <div className="rounded-lg border border-dashed border-zinc-300 p-3">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="w-5 h-5 rounded-full bg-sky-500 flex items-center justify-center">
@@ -2686,69 +2902,100 @@ export default function PriceCalculator({
                     </span>
                   </div>
                   <div className="pl-7">
-                    <div className="relative">
-                      <IconMapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-                      <input
-                        type="text"
-                        value={deliveryAddress}
-                        onChange={(e) => setDeliveryAddress(e.target.value)}
-                        placeholder="Introduceți adresa de livrare..."
-                        className="w-full h-9 pl-9 pr-3 rounded-md border border-zinc-200 bg-white text-sm placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400"
-                      />
-                    </div>
+                    <AddressAutocomplete
+                      value={deliveryAddress}
+                      onChange={handleDeliveryAddressChange}
+                      placeholder="Oraș, stradă, număr..."
+                    />
                     <p className="text-[10px] text-zinc-400 mt-1.5">
-                      Geocodarea va fi disponibilă în versiunea cu integrare
-                      Google Maps
+                      Geocodare OpenStreetMap. Selectați o sugestie pentru a
+                      calcula ruta rutieră.
                     </p>
                   </div>
                 </div>
 
-                {/* Mock Route Preview */}
+                {/* Real route preview (Leaflet + OSRM) */}
                 {hasValidSelection && (
-                  <div className="rounded-lg border border-zinc-200 bg-gradient-to-br from-zinc-100 to-zinc-50 p-4 relative overflow-hidden">
-                    <div className="absolute inset-0 opacity-10">
-                      <svg
-                        width="100%"
-                        height="100%"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <defs>
-                          <pattern
-                            id="grid"
-                            width="20"
-                            height="20"
-                            patternUnits="userSpaceOnUse"
-                          >
-                            <path
-                              d="M 20 0 L 0 0 0 20"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="0.5"
-                            />
-                          </pattern>
-                        </defs>
-                        <rect width="100%" height="100%" fill="url(#grid)" />
-                      </svg>
-                    </div>
-                    <div className="relative flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <IconRoute className="w-5 h-5 text-zinc-500" />
-                        <div>
+                  <div className="space-y-2">
+                    <RouteMap
+                      from={originCoords}
+                      to={deliveryCoords}
+                      geometry={routeResult?.geometry}
+                    />
+
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white p-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <IconRoute className="w-5 h-5 text-zinc-500 shrink-0" />
+                        <div className="min-w-0">
                           <p className="text-sm font-medium text-zinc-700">
                             Previzualizare rută
                           </p>
-                          <p className="text-[10px] text-zinc-400">
-                            Hartă indisponibilă în acest mock
-                          </p>
+                          {routeLoading && (
+                            <p className="text-[10px] text-zinc-400">
+                              Se calculează ruta rutieră...
+                            </p>
+                          )}
+                          {!routeLoading && routeError && (
+                            <p className="text-[10px] text-rose-600">
+                              {routeError}
+                            </p>
+                          )}
+                          {!routeLoading &&
+                            !routeError &&
+                            !routeResult &&
+                            !deliveryCoords && (
+                              <p className="text-[10px] text-zinc-400">
+                                Alegeți adresa de livrare pentru calcul.
+                              </p>
+                            )}
+                          {!routeLoading &&
+                            !routeError &&
+                            !routeResult &&
+                            deliveryCoords &&
+                            !originCoords && (
+                              <p className="text-[10px] text-amber-600">
+                                Locația furnizorului nu poate fi determinată.
+                              </p>
+                            )}
+                          {!routeLoading && routeResult && (
+                            <p className="text-[10px] text-zinc-400">
+                              Durată estimată: ~
+                              {Math.max(1, Math.round(routeResult.durationMin))}{" "}
+                              min · via OpenStreetMap / OSRM
+                            </p>
+                          )}
                         </div>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right shrink-0">
                         <p className="text-lg font-semibold text-zinc-900 font-mono tabular-nums">
-                          {currentDistance} km
+                          {routeResult
+                            ? routeResult.distanceKm.toFixed(1)
+                            : currentDistance}{" "}
+                          km
                         </p>
-                        <p className="text-[10px] text-zinc-400">
-                          {calcType === "VRAC" ? "comercial" : "dus"}
-                        </p>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <p className="text-[10px] text-zinc-400">
+                            {calcType === "VRAC" ? "comercial" : "dus"}
+                          </p>
+                          {routeResult &&
+                            calcType !== "DEPOZIT" &&
+                            !distanceTouchedRef.current[calcType] && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase tracking-wider">
+                                auto
+                              </span>
+                            )}
+                          {routeResult &&
+                            calcType !== "DEPOZIT" &&
+                            distanceTouchedRef.current[calcType] && (
+                              <button
+                                type="button"
+                                onClick={handleRestoreAutoDistance}
+                                className="text-[10px] text-sky-600 hover:text-sky-700 underline underline-offset-2"
+                              >
+                                Restabilește
+                              </button>
+                            )}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2826,7 +3073,7 @@ export default function PriceCalculator({
                       label="Distanță dus"
                       id="cifa_dist"
                       value={cifaDistKm}
-                      onChange={setCifaDistKm}
+                      onChange={handleCifaDistChange}
                       min={0}
                       step={1}
                       suffix="km"
@@ -2920,7 +3167,7 @@ export default function PriceCalculator({
                       label="Distanță dus"
                       id="pompa_dist"
                       value={pompaDistKm}
-                      onChange={setPompaDistKm}
+                      onChange={handlePompaDistChange}
                       min={0}
                       step={1}
                       suffix="km"
@@ -2998,7 +3245,7 @@ export default function PriceCalculator({
                       label="Distanță comercială"
                       id="vrac_dist"
                       value={vracDistKm}
-                      onChange={setVracDistKm}
+                      onChange={handleVracDistChange}
                       min={0}
                       step={1}
                       suffix="km"

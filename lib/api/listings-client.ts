@@ -1,65 +1,58 @@
 import { createClient } from "@/lib/supabase/client"
 import type { Tables, TablesInsert, TablesUpdate } from "@/types/supabase"
+import {
+  createListingAction,
+  updateListingAction,
+  deleteListingAction,
+} from "@/app/sell/listing/actions"
 
 export type Listing = Tables<"marketplace_listings">
 export type ListingInsert = Omit<TablesInsert<"marketplace_listings">, "id" | "created_at" | "updated_at">
 export type ListingUpdate = TablesUpdate<"marketplace_listings">
 
-// Client-side: create a new listing
+// createListing: thin wrapper around the server action. seller_id is injected
+// server-side from auth.uid() regardless of what the caller passes.
 export async function createListing(
   listing: ListingInsert
 ): Promise<{ success: boolean; data?: Listing; error?: string }> {
-  const supabase = createClient()
-
-  const { data, error } = await supabase
-    .from("marketplace_listings")
-    .insert(listing)
-    .select()
-    .single()
-
-  if (error) return { success: false, error: error.message }
-  return { success: true, data }
+  // Drop seller_id if provided; server action forces it from the session
+  const { seller_id: _ignored, ...payload } = listing as ListingInsert & { seller_id?: string }
+  void _ignored
+  const res = await createListingAction(payload as unknown as Parameters<typeof createListingAction>[0])
+  if (res.success) return { success: true, data: res.data as Listing }
+  return { success: false, error: res.error }
 }
 
-// Client-side: update an existing listing (owner only via RLS)
 export async function updateListing(
   id: number,
   updates: ListingUpdate
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = createClient()
-
-  const { error } = await supabase
-    .from("marketplace_listings")
-    .update(updates)
-    .eq("id", id)
-
-  if (error) return { success: false, error: error.message }
-  return { success: true }
+  const res = await updateListingAction(
+    id,
+    updates as unknown as Parameters<typeof updateListingAction>[1]
+  )
+  return res.success ? { success: true } : { success: false, error: res.error }
 }
 
-// Client-side: delete a listing (cascade deletes image rows too)
 export async function deleteListing(
   id: number
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = createClient()
-
-  const { error } = await supabase
-    .from("marketplace_listings")
-    .delete()
-    .eq("id", id)
-
-  if (error) return { success: false, error: error.message }
-  return { success: true }
+  const res = await deleteListingAction(id)
+  return res.success ? { success: true } : { success: false, error: res.error }
 }
 
-// Client-side: upload an image to Storage and insert a reference row
+// Image upload stays browser-side: storage RLS enforces the owner folder
+// prefix, and the DB row insert is gated by marketplace_listing_images RLS
+// (owner of parent listing).
 export async function uploadListingImage(
   listingId: number,
   file: File,
   displayOrder: number = 0
 ): Promise<{ success: boolean; path?: string; error?: string }> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) return { success: false, error: "Not authenticated" }
 
   const storagePath = `${user.id}/${listingId}/${Date.now()}-${file.name}`
@@ -83,7 +76,6 @@ export async function uploadListingImage(
   return { success: true, path: storagePath }
 }
 
-// Client-side: delete an image from Storage and its DB row
 export async function deleteListingImage(
   imageId: number,
   storagePath: string
@@ -105,7 +97,7 @@ export async function deleteListingImage(
   return { success: true }
 }
 
-// Client-side: check if a slug is available
+// Public read: slug availability check can stay client-side
 export async function checkSlugAvailable(slug: string): Promise<boolean> {
   const supabase = createClient()
   const { count } = await supabase
@@ -116,7 +108,6 @@ export async function checkSlugAvailable(slug: string): Promise<boolean> {
   return (count ?? 0) === 0
 }
 
-// Helper: get the public URL for a stored image path
 export function getImagePublicUrl(storagePath: string): string {
   const supabase = createClient()
   const { data } = supabase.storage

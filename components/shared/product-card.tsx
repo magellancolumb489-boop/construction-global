@@ -4,6 +4,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { Package, ArrowRight } from "lucide-react"
 import { MoneyDisplay } from "./money-display"
+import { WishlistToggle } from "./wishlist-toggle"
 import type { ProductListItem } from "@/types/domain"
 
 export function ProductCard({ product }: { product: ProductListItem }) {
@@ -11,7 +12,8 @@ export function ProductCard({ product }: { product: ProductListItem }) {
   const ctaLabel = product.listingKind === "concrete" ? "Configurare" : "Detalii"
 
   return (
-    <Link href={href} className="group block">
+    <Link href={href} className="group relative block">
+      <WishlistToggle target={{ kind: "listing", listing_id: Number(product.id) }} />
       <div className="overflow-hidden rounded-2xl border border-border/50 bg-card shadow-sm transition-all duration-300 hover:shadow-xl hover:border-primary/20 hover:-translate-y-1">
         {/* Image */}
         <div className="relative aspect-4/3 overflow-hidden">

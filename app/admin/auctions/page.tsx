@@ -14,7 +14,9 @@ import {
 } from "@/components/ui/alert-dialog"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { MoneyDisplay } from "@/components/shared/money-display"
-import { getAdminAuctions, cancelAuction, forceCloseAuction } from "@/lib/api/admin"
+import { getAdminAuctions } from "@/lib/api/admin"
+import { closeAuctionAction } from "@/app/admin/actions"
+import { useToast } from "@/hooks/use-toast"
 import type { AuctionListItem } from "@/types/domain"
 import { Search, XCircle, Lock } from "lucide-react"
 
@@ -22,6 +24,7 @@ export default function AdminAuctionsPage() {
   const [auctions, setAuctions] = useState<AuctionListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
+  const { toast } = useToast()
 
   useEffect(() => {
     getAdminAuctions().then((a) => { setAuctions(a); setLoading(false) })
@@ -32,14 +35,20 @@ export default function AdminAuctionsPage() {
     a.categoryName.toLowerCase().includes(search.toLowerCase())
   )
 
-  async function handleCancel(id: string) {
-    await cancelAuction(id)
-    setAuctions((prev) => prev.map((a) => a.id === id ? { ...a, status: "cancelled" as const } : a))
-  }
-
-  async function handleForceClose(id: string) {
-    await forceCloseAuction(id)
-    setAuctions((prev) => prev.map((a) => a.id === id ? { ...a, status: "ended" as const } : a))
+  async function handleClose(id: string, nextStatus: "cancelled" | "ended") {
+    // Both cancel and force-close funnel into the same admin RPC (close_auction)
+    // which flips status to ended. We keep the UI intent label distinct in the
+    // toast until cancel-specific semantics land in a future migration.
+    const numericId = Number(id)
+    if (!Number.isFinite(numericId)) return
+    const result = await closeAuctionAction(numericId)
+    if (result.success) {
+      setAuctions((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, status: nextStatus } : a))
+      )
+    } else {
+      toast({ title: "Operatiune esuata", description: result.error, variant: "destructive" })
+    }
   }
 
   return (
@@ -90,7 +99,7 @@ export default function AdminAuctionsPage() {
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                   <AlertDialogCancel>Nu</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleCancel(a.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Anuleaza</AlertDialogAction>
+                                  <AlertDialogAction onClick={() => handleClose(a.id, "cancelled")} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Anuleaza</AlertDialogAction>
                                 </AlertDialogFooter>
                               </AlertDialogContent>
                             </AlertDialog>
@@ -105,7 +114,7 @@ export default function AdminAuctionsPage() {
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                   <AlertDialogCancel>Nu</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleForceClose(a.id)}>Inchide</AlertDialogAction>
+                                  <AlertDialogAction onClick={() => handleClose(a.id, "ended")}>Inchide</AlertDialogAction>
                                 </AlertDialogFooter>
                               </AlertDialogContent>
                             </AlertDialog>

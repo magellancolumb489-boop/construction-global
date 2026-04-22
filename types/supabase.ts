@@ -351,30 +351,359 @@ export type Database = {
       profiles: {
         Row: {
           avatar_path: string | null
+          bio: string | null
+          company_name: string | null
           created_at: string
           display_name: string | null
+          entity_type: string | null
+          fiscal_address: Json | null
           id: string
           phone: string | null
+          preferences: Json
+          reg_com: string | null
           role: string
+          seller_activated_at: string | null
+          seller_policies: Json
+          supplier_settings: Json
+          tax_id: string | null
           updated_at: string
+          vat_id: string | null
+          website_url: string | null
         }
         Insert: {
           avatar_path?: string | null
+          bio?: string | null
+          company_name?: string | null
           created_at?: string
           display_name?: string | null
+          entity_type?: string | null
+          fiscal_address?: Json | null
           id: string
           phone?: string | null
+          preferences?: Json
+          reg_com?: string | null
           role?: string
+          seller_activated_at?: string | null
+          seller_policies?: Json
+          supplier_settings?: Json
+          tax_id?: string | null
           updated_at?: string
+          vat_id?: string | null
+          website_url?: string | null
         }
         Update: {
           avatar_path?: string | null
+          bio?: string | null
+          company_name?: string | null
           created_at?: string
           display_name?: string | null
+          entity_type?: string | null
+          fiscal_address?: Json | null
           id?: string
           phone?: string | null
+          preferences?: Json
+          reg_com?: string | null
           role?: string
+          seller_activated_at?: string | null
+          seller_policies?: Json
+          supplier_settings?: Json
+          tax_id?: string | null
           updated_at?: string
+          vat_id?: string | null
+          website_url?: string | null
+        }
+        Relationships: []
+      }
+      user_addresses: {
+        Row: {
+          city: string
+          country: string
+          county: string | null
+          created_at: string
+          id: number
+          is_default_billing: boolean
+          is_default_shipping: boolean
+          label: string | null
+          line1: string
+          line2: string | null
+          notes: string | null
+          phone: string | null
+          pickup_lat: number | null
+          pickup_lng: number | null
+          postal_code: string | null
+          recipient: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          city: string
+          country?: string
+          county?: string | null
+          created_at?: string
+          id?: never
+          is_default_billing?: boolean
+          is_default_shipping?: boolean
+          label?: string | null
+          line1: string
+          line2?: string | null
+          notes?: string | null
+          phone?: string | null
+          pickup_lat?: number | null
+          pickup_lng?: number | null
+          postal_code?: string | null
+          recipient?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          city?: string
+          country?: string
+          county?: string | null
+          created_at?: string
+          id?: never
+          is_default_billing?: boolean
+          is_default_shipping?: boolean
+          label?: string | null
+          line1?: string
+          line2?: string | null
+          notes?: string | null
+          phone?: string | null
+          pickup_lat?: number | null
+          pickup_lng?: number | null
+          postal_code?: string | null
+          recipient?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_notification_preferences: {
+        Row: {
+          channels: Json
+          quiet_hours: Json | null
+          topics: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          channels?: Json
+          quiet_hours?: Json | null
+          topics?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          channels?: Json
+          quiet_hours?: Json | null
+          topics?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      wishlist_items: {
+        Row: {
+          added_at: string
+          auction_id: number | null
+          id: number
+          listing_id: number | null
+          user_id: string
+        }
+        Insert: {
+          added_at?: string
+          auction_id?: number | null
+          id?: never
+          listing_id?: number | null
+          user_id: string
+        }
+        Update: {
+          added_at?: string
+          auction_id?: number | null
+          id?: never
+          listing_id?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wishlist_items_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_listings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wishlist_items_auction_id_fkey"
+            columns: ["auction_id"]
+            isOneToOne: false
+            referencedRelation: "auction_lots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reviews: {
+        Row: {
+          auction_id: number | null
+          body: string | null
+          created_at: string
+          id: number
+          listing_id: number | null
+          order_id: number | null
+          rating: number
+          reviewer_id: string
+          target_user_id: string
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          auction_id?: number | null
+          body?: string | null
+          created_at?: string
+          id?: never
+          listing_id?: number | null
+          order_id?: number | null
+          rating: number
+          reviewer_id: string
+          target_user_id: string
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          auction_id?: number | null
+          body?: string | null
+          created_at?: string
+          id?: never
+          listing_id?: number | null
+          order_id?: number | null
+          rating?: number
+          reviewer_id?: string
+          target_user_id?: string
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      message_threads: {
+        Row: {
+          buyer_id: string
+          context_id: number | null
+          context_type: string | null
+          created_at: string
+          id: number
+          last_message_at: string
+          seller_id: string
+          subject: string | null
+        }
+        Insert: {
+          buyer_id: string
+          context_id?: number | null
+          context_type?: string | null
+          created_at?: string
+          id?: never
+          last_message_at?: string
+          seller_id: string
+          subject?: string | null
+        }
+        Update: {
+          buyer_id?: string
+          context_id?: number | null
+          context_type?: string | null
+          created_at?: string
+          id?: never
+          last_message_at?: string
+          seller_id?: string
+          subject?: string | null
+        }
+        Relationships: []
+      }
+      messages: {
+        Row: {
+          attachments: Json
+          body: string
+          created_at: string
+          id: number
+          read_at: string | null
+          sender_id: string
+          thread_id: number
+        }
+        Insert: {
+          attachments?: Json
+          body: string
+          created_at?: string
+          id?: never
+          read_at?: string | null
+          sender_id: string
+          thread_id: number
+        }
+        Update: {
+          attachments?: Json
+          body?: string
+          created_at?: string
+          id?: never
+          read_at?: string | null
+          sender_id?: string
+          thread_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "message_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      login_events: {
+        Row: {
+          created_at: string
+          event: string
+          id: number
+          ip: string | null
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event: string
+          id?: never
+          ip?: string | null
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event?: string
+          id?: never
+          ip?: string | null
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      account_deletion_requests: {
+        Row: {
+          id: number
+          reason: string | null
+          requested_at: string
+          scheduled_for: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          id?: never
+          reason?: string | null
+          requested_at?: string
+          scheduled_for: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          id?: never
+          reason?: string | null
+          requested_at?: string
+          scheduled_for?: string
+          status?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -384,6 +713,9 @@ export type Database = {
     }
     Functions: {
       place_bid: { Args: { p_amount: number; p_lot_id: number }; Returns: Json }
+      close_auction: { Args: { p_lot_id: number }; Returns: Json }
+      set_user_role: { Args: { p_target: string; p_role: string }; Returns: Json }
+      is_admin: { Args: Record<string, never>; Returns: boolean }
     }
     Enums: {
       [_ in never]: never

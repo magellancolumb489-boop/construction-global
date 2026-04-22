@@ -1,9 +1,27 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 
 // Smoke test: verifies the Supabase connection is configured and reachable.
 // GET /api/supabase-health
-export async function GET() {
+//
+// Gated in production behind SUPABASE_HEALTH_SECRET to avoid leaking internal
+// diagnostics. In dev/preview the endpoint is open for convenience.
+export async function GET(req: NextRequest) {
+  const isProd = process.env.NODE_ENV === "production"
+  const secret = process.env.SUPABASE_HEALTH_SECRET
+
+  if (isProd) {
+    // Accept the secret from an explicit header or ?token=... query param
+    const provided =
+      req.headers.get("x-health-secret") ??
+      req.nextUrl.searchParams.get("token")
+
+    if (!secret || !provided || provided !== secret) {
+      // 404 rather than 401 -- do not confirm the route exists to anons
+      return NextResponse.json({ error: "Not found" }, { status: 404 })
+    }
+  }
+
   const checks: Record<string, unknown> = {
     envUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
     envKey:
@@ -14,25 +32,25 @@ export async function GET() {
   try {
     const supabase = await createClient()
 
-    // Auth health -- getClaims validates the JWT against the project's public keys
-    const { data: claims, error: claimsError } = await supabase.auth.getClaims()
+    const { data: claims } = await supabase.auth.getClaims()
     checks.authReachable = true
     checks.hasSession = !!claims?.claims
-    if (claimsError) checks.claimsError = claimsError.message
 
-    // Quick query to confirm the REST API responds (no real table needed).
-    // Any response -- including "table not found" -- proves the API is alive.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error: pingError } = await (supabase as any).from("_ping_nonexistent").select("id").limit(0)
     const tableNotFound = pingError?.message?.includes("schema cache") || pingError?.code === "42P01"
     checks.restApiReachable = !pingError || tableNotFound
-    checks.restApiMessage = pingError?.message ?? "ok"
   } catch (err) {
+    // Do not leak raw exception text to the client; just log on the server.
+    console.error("[supabase-health] check failed:", err instanceof Error ? err.message : err)
     checks.authReachable = false
-    checks.error = err instanceof Error ? err.message : String(err)
   }
 
-  const healthy = checks.envUrl && checks.envKey && checks.authReachable && checks.restApiReachable
+  const healthy =
+    checks.envUrl &&
+    checks.envKey &&
+    checks.authReachable &&
+    checks.restApiReachable
 
   return NextResponse.json(
     { healthy, checks, ts: new Date().toISOString() },

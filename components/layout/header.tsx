@@ -19,6 +19,7 @@ import {
   UserCircle,
   ClipboardList,
   Settings,
+  Heart,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -49,9 +50,11 @@ interface InitialUser {
 
 interface SiteHeaderProps {
   initialUser: InitialUser | null
+  isAdmin?: boolean
+  wishlistCount?: number
 }
 
-export function SiteHeader({ initialUser }: SiteHeaderProps) {
+export function SiteHeader({ initialUser, isAdmin = false, wishlistCount = 0 }: SiteHeaderProps) {
   const router = useRouter()
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -177,6 +180,20 @@ export function SiteHeader({ initialUser }: SiteHeaderProps) {
             />
           </div>
 
+          {isLoggedIn && (
+            <Link href="/account?tab=wishlist">
+              <Button variant="ghost" size="icon" className="relative rounded-xl">
+                <Heart className="h-5 w-5" />
+                {wishlistCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground shadow-sm">
+                    {wishlistCount}
+                  </span>
+                )}
+                <span className="sr-only">Lista de favorite</span>
+              </Button>
+            </Link>
+          )}
+
           <Link href="/cart">
             <Button variant="ghost" size="icon" className="relative rounded-xl">
               <ShoppingCart className="h-5 w-5" />
@@ -218,12 +235,16 @@ export function SiteHeader({ initialUser }: SiteHeaderProps) {
                     <Gavel className="h-4 w-4" /> Licitatiile mele
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild className="rounded-lg">
-                  <Link href="/admin" className="gap-2">
-                    <Settings className="h-4 w-4" /> Panou Admin
-                  </Link>
-                </DropdownMenuItem>
+                {isAdmin && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild className="rounded-lg">
+                      <Link href="/admin" className="gap-2">
+                        <Settings className="h-4 w-4" /> Panou Admin
+                      </Link>
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout} className="gap-2 rounded-lg text-destructive focus:text-destructive">
                   <LogOut className="h-4 w-4" />
@@ -245,6 +266,18 @@ export function SiteHeader({ initialUser }: SiteHeaderProps) {
 
         {/* Mobile Right */}
         <div className="flex items-center gap-1 md:hidden">
+          {isLoggedIn && (
+            <Link href="/account?tab=wishlist">
+              <Button variant="ghost" size="icon" className="relative h-10 w-10 rounded-xl">
+                <Heart className="h-5 w-5" />
+                {wishlistCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                    {wishlistCount}
+                  </span>
+                )}
+              </Button>
+            </Link>
+          )}
           <Link href="/cart">
             <Button variant="ghost" size="icon" className="relative h-10 w-10 rounded-xl">
               <ShoppingCart className="h-5 w-5" />

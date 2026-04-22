@@ -31,3 +31,56 @@ When changing how users discover, configure, cart, or pay for marketplace produc
 - **Romanian copy:** keep domain wording natural and consistent with surrounding strings (e.g. labels like “Cos”, “Finalizare comanda”); URLs may stay as today (`/cart`, `/checkout`) unless the user requests slug changes.
 - **Calculator-backed products:** prefer the journey **product page → configurare comandă → coșul meu / review** (configure order, then cart or review), aligned with existing routes and components.
 - Before **large** edits, briefly list which files you expect to touch and why.
+
+## Phase 2 — Stripe checkout seam (post-Phase-1 hardening)
+
+Stripe integration is NOT wired in Phase 1. This section locks down the shape
+the Phase-2 migration and server action will use, so the current UI and RLS
+boundaries keep working when payment lands.
+
+### Planned tables (Phase 2 migration)
+
+- `orders`
+  - `id uuid pk`, `buyer_id uuid references profiles(id)`, `seller_id uuid references profiles(id)`,
+    `currency text`, `subtotal_cents bigint`, `transport_cents bigint`, `vat_cents bigint`,
+    `total_cents bigint`, `status text` (`pending|paid|fulfilled|cancelled|refunded`),
+    `stripe_session_id text`, `stripe_payment_intent_id text`, `idempotency_key text unique`,
+    `notes text`, `billing_json jsonb`, `shipping_json jsonb`,
+    `created_at timestamptz`, `updated_at timestamptz`.
+- `order_lines`
+  - `id bigserial pk`, `order_id uuid references orders(id) on delete cascade`,
+    `listing_id int references marketplace_listings(id)`,
+    `title text`, `unit text`, `qty numeric`, `unit_price_cents bigint`,
+    `line_total_cents bigint`, `snapshot_json jsonb`.
+- `payments`
+  - `id uuid pk`, `order_id uuid references orders(id)`, `provider text` (`stripe`),
+    `provider_event_id text unique`, `amount_cents bigint`, `status text`,
+    `raw_json jsonb`, `created_at timestamptz`.
+
+RLS: `orders`/`order_lines` readable to `auth.uid() in (buyer_id, seller_id)` or admin.
+`payments` readable to admin and the buyer/seller of the linked order.
+All writes go through SECURITY DEFINER functions or server actions; never direct.
+
+### Server action `createCheckout` (to live in `app/checkout/actions.ts`)
+
+1. Read the client-supplied cart items (ids + quantities ONLY).
+2. Re-fetch `marketplace_listings` server-side; recompute every line total
+   using DB prices (never trust cart prices from the client).
+3. Validate: qty within `available_qty`/`min_order_qty`; items still active.
+4. Insert an `orders` row with `status='pending'` and a cryptographic
+   `idempotency_key` so duplicate form submits cannot double-charge.
+5. Call Stripe `checkout.sessions.create` with `client_reference_id = order.id`,
+   store `stripe_session_id` on the order, return the session URL.
+6. Stripe webhook (Route Handler `app/api/stripe/webhook/route.ts`) verifies
+   the signature, looks up the order by `client_reference_id`, and flips
+   `status='paid'` idempotently. Update `components/shared/winner-payment-block.tsx`
+   `href="#"` to the stored `stripe_session_id` URL at that point.
+
+### UI touchpoints that must stay stable for Phase 2
+
+- `app/cart/page.tsx`, `lib/cart-context.tsx`: keep the cart shape as
+  `{ id, qty }` minimally; anything richer is recomputed server-side.
+- `components/shared/calc-price.tsx`: continue to be *display* logic;
+  authoritative totals come from the `createCheckout` server recompute.
+- `components/shared/winner-payment-block.tsx`: Phase-2 wires the real URL.
+
