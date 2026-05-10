@@ -3,8 +3,12 @@
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import { addressUpsertSchema, type AddressUpsertInput } from "@/lib/validation"
+import type { Database } from "@/types/supabase"
 
 type ActionResult = { success: true } | { success: false; error: string }
+
+type UserAddressesUpdate = Database["public"]["Tables"]["user_addresses"]["Update"]
+type UserAddressesInsert = Database["public"]["Tables"]["user_addresses"]["Insert"]
 
 function firstIssue(issues: { message: string }[] | undefined): string {
   return issues?.[0]?.message ?? "Date invalide"
@@ -44,7 +48,7 @@ async function clearDefaults(
   const col = kind === "billing" ? "is_default_billing" : "is_default_shipping"
   let q = supabase
     .from("user_addresses")
-    .update({ [col]: false })
+    .update({ [col]: false } as UserAddressesUpdate)
     .eq("user_id", userId)
     .eq(col, true)
   if (exceptId) q = q.neq("id", exceptId)
@@ -78,7 +82,7 @@ export async function createAddressAction(
   const payload = { ...pickAllowed(parsed.data), user_id: user.id }
   const { error } = await supabase
     .from("user_addresses")
-    .insert(payload as never)
+    .insert(payload as UserAddressesInsert)
   if (error) return { success: false, error: error.message }
   revalidatePath("/account")
   return { success: true }
@@ -109,7 +113,7 @@ export async function updateAddressAction(
   const payload = pickAllowed(parsed.data)
   const { error } = await supabase
     .from("user_addresses")
-    .update(payload)
+    .update(payload as UserAddressesUpdate)
     .eq("id", id)
     .eq("user_id", user.id)
   if (error) return { success: false, error: error.message }
@@ -160,7 +164,7 @@ export async function setDefaultAddressAction(
   const col = kind === "billing" ? "is_default_billing" : "is_default_shipping"
   const { error } = await supabase
     .from("user_addresses")
-    .update({ [col]: true })
+    .update({ [col]: true } as UserAddressesUpdate)
     .eq("id", id)
     .eq("user_id", user.id)
   if (error) return { success: false, error: error.message }

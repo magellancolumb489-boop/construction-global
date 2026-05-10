@@ -8,8 +8,11 @@ import {
   type ReviewCreateInput,
   type ReviewUpdateInput,
 } from "@/lib/validation"
+import type { Database } from "@/types/supabase"
 
 type ActionResult = { success: true } | { success: false; error: string }
+
+type ReviewsUpdate = Database["public"]["Tables"]["reviews"]["Update"]
 
 function firstIssue(issues: { message: string }[] | undefined): string {
   return issues?.[0]?.message ?? "Date invalide"
@@ -54,7 +57,7 @@ export async function updateReviewAction(raw: ReviewUpdateInput): Promise<Action
   if (!parsed.success) return { success: false, error: firstIssue(parsed.error.issues) }
 
   const { id, ...updates } = parsed.data
-  const payload: Record<string, unknown> = {}
+  const payload: ReviewsUpdate = {}
   if (updates.rating != null) payload.rating = updates.rating
   if (updates.title !== undefined) payload.title = updates.title
   if (updates.body != null) payload.body = updates.body

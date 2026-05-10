@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
+import type { Database } from "@/types/supabase"
 import {
   profileUpdateSchema,
   type ProfileUpdateInput,
@@ -18,6 +19,9 @@ import {
 } from "@/lib/validation"
 
 type ActionResult = { success: true } | { success: false; error: string }
+
+/** Narrow updates to the generated `profiles` row type for Supabase `.update()`. */
+type ProfilesUpdate = Database["public"]["Tables"]["profiles"]["Update"]
 
 function firstIssue(issues: { message: string }[] | undefined): string {
   return issues?.[0]?.message ?? "Date invalide"
@@ -91,7 +95,11 @@ export async function updateBusinessProfileAction(
     { ...parsed.data, bio: raw.bio ?? null },
     ALLOWED_BUSINESS_FIELDS,
   )
-  const { error } = await supabase.from("profiles").update(payload).eq("id", user.id)
+  // pickAllowed returns Partial<Record<string, unknown>>; cast after Zod + allowlist for typed `.update()`.
+  const { error } = await supabase
+    .from("profiles")
+    .update(payload as ProfilesUpdate)
+    .eq("id", user.id)
   if (error) return { success: false, error: error.message }
   revalidatePath("/account")
   return { success: true }
