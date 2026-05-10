@@ -112,8 +112,9 @@ export function ConfigureMaterialsOrder({ product, initialQty }: Props) {
   const { addItem } = useCart()
   const { toast } = useToast()
 
-  const ml = product.materialLogistics
-  if (!ml) return null
+  const materialLogistics = product.materialLogistics
+  if (!materialLogistics) return null
+  const ml = materialLogistics
 
   const maxQ = Math.max(1, product.availableQty)
   const [qty, setQty] = useState(() =>
