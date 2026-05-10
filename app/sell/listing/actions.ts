@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server"
 import {
   listingCreateSchema,
   listingUpdateSchema,
+  concreteClassesRpcPayloadSchema,
   type ListingCreateInput,
   type ListingUpdateInput,
 } from "@/lib/validation"
@@ -40,6 +41,7 @@ const ALLOWED_FIELDS = [
   "equipment_condition",
   "equipment_model",
   "equipment_year",
+  "seller_assumes_transport",
 ] as const
 
 function pickAllowed<T extends Record<string, unknown>>(input: T): Partial<T> {
@@ -119,6 +121,47 @@ export async function updateListingAction(
   revalidatePath("/account")
   revalidatePath("/marketplace")
   if (existing.slug) revalidatePath(`/products/${existing.slug}-${id}`)
+  return { success: true }
+}
+
+/** Replace all concrete class rows for a listing (seller-only, transactional RPC). */
+export async function upsertConcreteClassesAction(
+  listingId: number,
+  rawRows: unknown,
+): Promise<ActionResult> {
+  if (!Number.isFinite(listingId) || listingId <= 0) {
+    return { success: false, error: "ID invalid." }
+  }
+  const parsed = concreteClassesRpcPayloadSchema.safeParse(rawRows)
+  if (!parsed.success) {
+    return { success: false, error: firstIssue(parsed.error.issues) }
+  }
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: "Nu esti autentificat." }
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from("marketplace_listings")
+    .select("seller_id, slug")
+    .eq("id", listingId)
+    .maybeSingle()
+  if (fetchErr || !existing) return { success: false, error: "Anunt inexistent." }
+  if (existing.seller_id !== user.id) {
+    return { success: false, error: "Nu esti proprietarul acestui anunt." }
+  }
+
+  const { error } = await supabase.rpc("upsert_listing_concrete_classes", {
+    p_listing_id: listingId,
+    p_rows: parsed.data,
+  })
+  if (error) return { success: false, error: error.message }
+
+  revalidatePath("/account")
+  revalidatePath("/marketplace")
+  if (existing.slug) revalidatePath(`/products/${existing.slug}-${listingId}`)
   return { success: true }
 }
 

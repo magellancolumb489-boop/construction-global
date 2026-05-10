@@ -41,6 +41,7 @@ export default async function EditListingPage({
         categories={categories.map((c) => ({ id: c.id, name: c.name }))}
         editMode
         listing={listing}
+        existingConcreteClasses={listing.marketplace_listing_concrete_classes ?? []}
         existingImages={listing.marketplace_listing_images.map((img) => ({
           id: img.id,
           storage_path: img.storage_path,

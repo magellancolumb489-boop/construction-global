@@ -8,8 +8,7 @@ import type {
 
 // Admin read-only stubs (delays simulate Supabase latency in the dashboard).
 // Mutating admin operations live in app/admin/actions.ts and are backed by
-// SECURITY DEFINER RPCs (set_user_role, close_auction). Never expose a
-// client-side write to profiles.role or auction_lots protected columns.
+// SECURITY DEFINER RPC (set_user_role). Never expose a client-side write to profiles.role.
 
 const delay = (ms = 400) => new Promise((r) => setTimeout(r, ms))
 
@@ -55,6 +54,5 @@ export async function markOrderFulfilled(
   return { success: true }
 }
 
-// NOTE: cancelAuction / forceCloseAuction / changeUserRole were removed from
-// this client module on 2026-04-22. Call the server actions in
-// app/admin/actions.ts instead: closeAuctionAction and changeUserRoleAction.
+// NOTE: Admin auction mutations are stand-down. User role changes use
+// changeUserRoleAction in app/admin/actions.ts.

@@ -1,67 +1,59 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { MoneyDisplay } from "@/components/shared/money-display"
 import { getAdminAuctions } from "@/lib/api/admin"
-import { closeAuctionAction } from "@/app/admin/actions"
-import { useToast } from "@/hooks/use-toast"
 import type { AuctionListItem } from "@/types/domain"
-import { Search, XCircle, Lock } from "lucide-react"
+import { Search } from "lucide-react"
 
+// Admin table shell: stub API returns []; optional demo rows could be wired later.
 export default function AdminAuctionsPage() {
   const [auctions, setAuctions] = useState<AuctionListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
-  const { toast } = useToast()
 
   useEffect(() => {
-    getAdminAuctions().then((a) => { setAuctions(a); setLoading(false) })
+    getAdminAuctions().then((a) => {
+      setAuctions(a)
+      setLoading(false)
+    })
   }, [])
 
-  const filtered = auctions.filter((a) =>
-    a.title.toLowerCase().includes(search.toLowerCase()) ||
-    a.categoryName.toLowerCase().includes(search.toLowerCase())
+  const filtered = auctions.filter(
+    (a) =>
+      a.title.toLowerCase().includes(search.toLowerCase()) ||
+      a.categoryName.toLowerCase().includes(search.toLowerCase()),
   )
-
-  async function handleClose(id: string, nextStatus: "cancelled" | "ended") {
-    // Both cancel and force-close funnel into the same admin RPC (close_auction)
-    // which flips status to ended. We keep the UI intent label distinct in the
-    // toast until cancel-specific semantics land in a future migration.
-    const numericId = Number(id)
-    if (!Number.isFinite(numericId)) return
-    const result = await closeAuctionAction(numericId)
-    if (result.success) {
-      setAuctions((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, status: nextStatus } : a))
-      )
-    } else {
-      toast({ title: "Operatiune esuata", description: result.error, variant: "destructive" })
-    }
-  }
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-foreground">Gestionare Licitatii</h1>
+      <p className="text-sm text-muted-foreground">
+        Mod administrativ in stand-by — nu exista RPC `close_auction`. Lista ramane goala pana la relansarea licitatiilor.
+      </p>
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder="Cauta licitatii..." className="pl-10" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <Input
+          placeholder="Cauta licitatii..."
+          className="pl-10"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
       </div>
       <Card>
         <CardContent className="p-0">
           {loading ? (
-            <div className="space-y-3 p-6">{[1, 2, 3, 4].map((i) => <div key={i} className="h-12 animate-pulse rounded bg-muted" />)}</div>
+            <div className="space-y-3 p-6">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-12 animate-pulse rounded bg-muted" />
+              ))}
+            </div>
           ) : (
             <Table>
               <TableHeader>
@@ -72,7 +64,6 @@ export default function AdminAuctionsPage() {
                   <TableHead>Status</TableHead>
                   <TableHead>Oferta Curenta</TableHead>
                   <TableHead>Nr. Oferte</TableHead>
-                  <TableHead className="text-right">Actiuni</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -81,51 +72,21 @@ export default function AdminAuctionsPage() {
                     <TableCell className="font-mono text-xs">{a.id}</TableCell>
                     <TableCell className="font-medium">{a.title}</TableCell>
                     <TableCell>{a.categoryName}</TableCell>
-                    <TableCell><StatusBadge status={a.status} /></TableCell>
-                    <TableCell><MoneyDisplay amount={a.currentHighestBid} currency={a.currency} /></TableCell>
-                    <TableCell>{a.bidCount}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        {a.status === "active" && (
-                          <>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive"><XCircle className="h-4 w-4" /></Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Anulare Licitatie</AlertDialogTitle>
-                                  <AlertDialogDescription>Sunteti sigur ca doriti sa anulati licitatia &quot;{a.title}&quot;? Aceasta actiune nu poate fi anulata.</AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Nu</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleClose(a.id, "cancelled")} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Anuleaza</AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="sm"><Lock className="h-4 w-4" /></Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Inchidere Fortata</AlertDialogTitle>
-                                  <AlertDialogDescription>Sunteti sigur ca doriti sa inchideti fortat licitatia &quot;{a.title}&quot;?</AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Nu</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleClose(a.id, "ended")}>Inchide</AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </>
-                        )}
-                      </div>
+                    <TableCell>
+                      <StatusBadge status={a.status} />
                     </TableCell>
+                    <TableCell>
+                      <MoneyDisplay amount={a.currentHighestBid} currency={a.currency} />
+                    </TableCell>
+                    <TableCell>{a.bidCount}</TableCell>
                   </TableRow>
                 ))}
                 {filtered.length === 0 && (
-                  <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Nicio licitatie gasita.</TableCell></TableRow>
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                      Nicio licitatie in sistem.
+                    </TableCell>
+                  </TableRow>
                 )}
               </TableBody>
             </Table>

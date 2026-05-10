@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
 import { MoneyDisplay } from "@/components/shared/money-display"
 import { EmptyState } from "@/components/shared/empty-state"
+import { CONSISTENCY_LABELS } from "@/lib/listing-wizard-types"
 import { useCart } from "@/lib/cart-context"
 
 export default function CartPage() {
@@ -62,6 +63,25 @@ export default function CartPage() {
                       <h3 className="font-semibold text-card-foreground">
                         {item.name}
                       </h3>
+                      {item.configureConcreteSelection && (
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          Beton: {item.configureConcreteSelection.classCode} ·{" "}
+                          {item.configureConcreteSelection.consistency in
+                          CONSISTENCY_LABELS
+                            ? CONSISTENCY_LABELS[
+                                item.configureConcreteSelection
+                                  .consistency as keyof typeof CONSISTENCY_LABELS
+                              ]
+                            : item.configureConcreteSelection.consistency}{" "}
+                          (
+                          <MoneyDisplay
+                            amount={item.configureConcreteSelection.unitPrice}
+                            currency={item.configureConcreteSelection.currency}
+                            className="inline"
+                          />
+                          /{item.configureConcreteSelection.unit})
+                        </p>
+                      )}
                       <p className="text-sm text-muted-foreground">
                         <MoneyDisplay amount={item.price} currency={item.currency} />{" "}
                         / {item.unit}

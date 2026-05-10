@@ -4,21 +4,20 @@ import { useState, useTransition } from "react"
 import { Heart, Loader2 } from "lucide-react"
 import { toggleWishlist } from "@/lib/api/wishlist-client"
 
-interface ListingTarget { kind: "listing"; listing_id: number }
-interface AuctionTarget { kind: "auction"; auction_id: number }
-
-type WishlistTarget = ListingTarget | AuctionTarget
+/** Wishlist target: marketplace listings only (auction stand-down). */
+export interface ListingWishlistTarget {
+  kind: "listing"
+  listing_id: number
+}
 
 interface WishlistToggleProps {
-  target: WishlistTarget
+  target: ListingWishlistTarget
   initialSaved?: boolean
   label?: string
   className?: string
 }
 
-// Compact floating toggle that mounts on top of product/auction cards. Stays
-// optimistic so the card feels snappy; the server action is the source of
-// truth and can undo the local flip if it fails.
+// Compact floating toggle on product cards. Optimistic UI; server action is source of truth.
 export function WishlistToggle({ target, initialSaved = false, label, className }: WishlistToggleProps) {
   const [saved, setSaved] = useState(initialSaved)
   const [pending, startTransition] = useTransition()

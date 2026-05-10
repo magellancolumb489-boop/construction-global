@@ -12,7 +12,7 @@ const OPTIONS: {
   {
     id: "concrete",
     title: "Beton cu transport",
-    hint: "CIFA, POMPĂ sau VRAC — distanța și accesoriile se calculează la comandă.",
+    hint: "CIFA / POMPĂ, clase și consistențe — distanța și accesoriile se calculează la comandă.",
     icon: Truck,
   },
   {

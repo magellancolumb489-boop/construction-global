@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-export const threadContextSchema = z.enum(["order", "listing", "auction"])
+export const threadContextSchema = z.enum(["order", "listing"])
 
 export const threadOpenSchema = z.object({
   seller_id: z.string().uuid(),

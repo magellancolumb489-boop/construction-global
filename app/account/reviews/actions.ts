@@ -36,7 +36,6 @@ export async function createReviewAction(raw: ReviewCreateInput): Promise<Action
     title: parsed.data.title ?? null,
     body: parsed.data.body,
     listing_id: parsed.data.listing_id ?? null,
-    auction_id: parsed.data.auction_id ?? null,
     order_id: parsed.data.order_id ?? null,
   })
   if (error) return { success: false, error: error.message }

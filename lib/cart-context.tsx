@@ -3,9 +3,14 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
 import type { CartItem } from "@/types/domain"
 
+/** Rezultat `addItem` — un singur vânzător per coș (cerință legală). */
+export type AddItemResult =
+  | { ok: true }
+  | { ok: false; reason: "seller_mismatch" }
+
 interface CartContextValue {
   items: CartItem[]
-  addItem: (item: CartItem) => void
+  addItem: (item: CartItem) => AddItemResult
   updateQty: (productId: string, qty: number) => void
   removeItem: (productId: string) => void
   clearCart: () => void
@@ -49,18 +54,40 @@ export function CartProvider({ children }: { children: ReactNode }) {
     if (hydrated) saveCart(items)
   }, [items, hydrated])
 
-  const addItem = useCallback((item: CartItem) => {
+  const addItem = useCallback((item: CartItem): AddItemResult => {
+    // Blochează amestecul de vânzători: primul rând cu `sellerId` din coș devine „lock”.
+    // Rânduri fără sellerId (localStorage vechi) nu blochează până apare un UUID explicit.
+    let outcome: AddItemResult = { ok: true }
+
     setItems((prev) => {
+      const cartSellerId = prev.find((i) => i.sellerId)?.sellerId
+      if (
+        prev.length > 0 &&
+        item.sellerId &&
+        cartSellerId &&
+        cartSellerId !== item.sellerId
+      ) {
+        outcome = { ok: false, reason: "seller_mismatch" }
+        return prev
+      }
+
       const existing = prev.find((i) => i.productId === item.productId)
       if (existing) {
         return prev.map((i) =>
           i.productId === item.productId
-            ? { ...i, qty: Math.min(i.qty + item.qty, i.availableQty) }
+            ? {
+                ...i,
+                qty: Math.min(i.qty + item.qty, i.availableQty),
+                // Backfill sellerId pentru linii vechi din localStorage care nu îl aveau.
+                sellerId: i.sellerId ?? item.sellerId,
+              }
             : i
         )
       }
       return [...prev, item]
     })
+
+    return outcome
   }, [])
 
   const updateQty = useCallback((productId: string, qty: number) => {

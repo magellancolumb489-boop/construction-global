@@ -84,8 +84,9 @@ function ProductPurchaseBlock({
 
   function handleAddToCart() {
     const q = allowQty ? Math.min(Math.max(1, qty), maxQ) : 1
-    addItem({
+    const res = addItem({
       productId: product.id,
+      sellerId: product.sellerId,
       name: product.name,
       price: product.price,
       unit: product.unit,
@@ -100,6 +101,15 @@ function ProductPurchaseBlock({
       configurationRequired: false,
       configurationComplete: true,
     })
+    if (!res.ok && res.reason === "seller_mismatch") {
+      toast({
+        variant: "destructive",
+        title: "Alt vânzător în coș",
+        description:
+          "Puteți comanda de la un singur vânzător per plată. Finalizați sau goliți coșul înainte de a adăuga produse de la alt furnizor.",
+      })
+      return
+    }
     toast({
       title: "Adaugat in cos",
       description: "Puteti continua cumparaturile sau finaliza comanda.",

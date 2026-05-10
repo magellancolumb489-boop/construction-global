@@ -1,3 +1,5 @@
+import type { ConcreteClassSelection } from "@/lib/listing-wizard-types"
+
 // Currency
 export type Currency = "RON" | "EUR"
 
@@ -59,6 +61,15 @@ export type ProductUnit = "TON" | "KG" | "M3" | "BUC" | "ML"
 /** Mirrors marketplace_listings.listing_type — drives PDP and cart behaviour. */
 export type ListingKind = "concrete" | "materials" | "equipment" | "services"
 
+/** Beton ales la configurare — persistat în coș pentru afișare / checkout. */
+export interface CartConcreteSelection {
+  classCode: string
+  consistency: string
+  unitPrice: number
+  currency: Currency
+  unit: ProductUnit
+}
+
 export interface ProductListItem {
   id: string
   slug: string
@@ -83,6 +94,10 @@ export interface ProductDetail extends ProductListItem {
   /** Listing location label from DB */
   location: string | null
   sellerDisplayName: string | null
+  /** Public company name from profiles.company_name (nullable). */
+  sellerCompanyName: string | null
+  /** profiles.entity_type: PF, PFA, SRL, SA, II, IF, or null. */
+  sellerEntityType: string | null
   sellerPhone: string | null
   /** concrete → distance calculator; other kinds use fixed fees or simple add-to-cart. */
   listingKind: ListingKind
@@ -93,6 +108,11 @@ export interface ProductDetail extends ProductListItem {
   pickupLng: number | null
   transportModes: string[] | null
   serviceArea: string | null
+  /**
+   * Rânduri `marketplace_listing_concrete_classes` mapate ca la wizard vânzător;
+   * goală pentru non-beton sau anunțuri vechi fără migrare.
+   */
+  concreteClasses: ConcreteClassSelection[]
 }
 
 /** Snapshot of livrare + fiscal from configurare; also stored for checkout prefill */
@@ -106,9 +126,22 @@ export interface OrderConfigureBuyerDelivery {
   vatNumber?: string
 }
 
+/** Optional billing address when different from livrare (configurare flow). */
+export interface OrderConfigureBuyerBilling {
+  addressLine1: string
+  city: string
+  county: string
+  country: string
+  isCompany: boolean
+  companyName?: string
+  vatNumber?: string
+}
+
 // Cart
 export interface CartItem {
   productId: string
+  /** UUID vânzător — obligatoriu pentru linii noi; lipsă = coș vechi din localStorage. */
+  sellerId?: string
   name: string
   price: number
   unit: ProductUnit
@@ -131,8 +164,12 @@ export interface CartItem {
   }
   /** Livrare + fiscal captured at configurare (optional prefill for checkout) */
   configureDelivery?: OrderConfigureBuyerDelivery
+  /** When set, invoice uses this address instead of configureDelivery. */
+  configureBilling?: OrderConfigureBuyerBilling
   /** One-time transport surcharge for non-calculator listings (added to line total). */
   transportFee?: number
+  /** Detaliu beton după configurare (clasă + consistență + preț unitar folosit). */
+  configureConcreteSelection?: CartConcreteSelection
 }
 
 // Orders

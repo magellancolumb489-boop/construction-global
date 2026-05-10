@@ -3,7 +3,6 @@ import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import { getProfile } from "@/lib/api/profile"
 import { getMyListings } from "@/lib/api/listings"
-import { getMyAuctions } from "@/lib/api/auctions"
 import { getMyAddresses } from "@/lib/api/addresses"
 import { getMyWishlist } from "@/lib/api/wishlist"
 import { getReviewsGiven, getReviewsReceived } from "@/lib/api/reviews"
@@ -29,7 +28,6 @@ export default async function AccountPage() {
   const [
     profile,
     myListings,
-    myAuctions,
     addresses,
     wishlist,
     reviewsGiven,
@@ -42,7 +40,6 @@ export default async function AccountPage() {
   ] = await Promise.all([
     getProfile(),
     getMyListings(),
-    getMyAuctions(),
     getMyAddresses(),
     getMyWishlist(),
     getReviewsGiven(),
@@ -61,7 +58,7 @@ export default async function AccountPage() {
         currentUserId={user.id}
         profile={profile}
         myListings={myListings}
-        myAuctions={myAuctions}
+        myAuctions={[]}
         addresses={addresses}
         wishlist={wishlist}
         reviewsGiven={reviewsGiven}

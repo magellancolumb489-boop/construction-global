@@ -9,13 +9,24 @@ import React, {
 } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import type { ProductDetail, ProductUnit } from "@/types/domain";
+import type {
+  CartConcreteSelection,
+  ProductDetail,
+  ProductUnit,
+} from "@/types/domain";
+import {
+  CONCRETE_CLASS_CATALOG,
+  CONCRETE_CLASS_ORDER,
+  CONSISTENCY_LABELS,
+  type ConcreteConsistency,
+} from "@/lib/listing-wizard-types";
 import { AddressAutocomplete } from "@/components/shared/address-autocomplete";
 import { RouteMap } from "@/components/shared/route-map";
 import {
   computeRoute,
   geocodeOne,
   RoutingError,
+  type GeocodeAddressParts,
   type GeocodeResult,
   type LatLng,
   type RouteResult,
@@ -32,6 +43,9 @@ export interface ProfileRow {
   id: string;
   display_name: string;
   phone?: string;
+  /** Company name from profiles (public); optional for mock/legacy rows. */
+  company_name?: string | null;
+  entity_type?: string | null;
 }
 
 export interface CategoryRow {
@@ -99,15 +113,11 @@ export interface DeliveryCoverageRule {
 export interface CifaRule {
   id: string;
   supplier_id: string;
-  default_capacity_mc: number;
-  min_capacity_mc: number;
-  max_capacity_mc: number;
   transport_per_km_lei: number;
   min_transport_lei: number;
-  underload_fee_per_mc: number;
+  /** Per-mc handling/orientative surcharge (additive with distance leg). */
+  handling_per_mc_lei: number;
   tube_fee_lei: number;
-  default_included_unloading_minutes: number;
-  default_waiting_fee_per_min_lei: number;
   notes?: string;
 }
 
@@ -143,13 +153,8 @@ export interface VracRule {
 const CIFA_DEFAULTS = {
   transport_per_km_lei: 12,
   min_transport_lei: 200,
-  underload_fee_per_mc: 50,
+  handling_per_mc_lei: 8,
   tube_fee_lei: 60,
-  default_included_unloading_minutes: 10,
-  default_waiting_fee_per_min_lei: 5,
-  default_capacity_mc: 7,
-  min_capacity_mc: 4,
-  max_capacity_mc: 10,
 } as const;
 
 const POMPA_DEFAULTS = {
@@ -224,7 +229,9 @@ export interface QuoteBreakdown {
 // ============================================================
 
 export function mapProfileToSupplierOption(p: ProfileRow) {
-  return { value: p.id, label: p.display_name, phone: p.phone };
+  const label =
+    p.company_name?.trim() || p.display_name?.trim() || "Vânzător";
+  return { value: p.id, label, phone: p.phone };
 }
 
 export function mapListingToMaterialOption(l: MarketplaceListingRow) {
@@ -353,8 +360,13 @@ export function buildMarketplaceFlowValidationSource(
   };
   const profileRow: ProfileRow = {
     id: product.sellerId,
-    display_name: product.sellerDisplayName?.trim() || "Furnizor",
+    display_name:
+      product.sellerDisplayName?.trim() ||
+      product.sellerCompanyName?.trim() ||
+      "Vânzător",
     phone: product.sellerPhone ?? undefined,
+    company_name: product.sellerCompanyName ?? null,
+    entity_type: product.sellerEntityType ?? null,
   };
   const categoryRow: CategoryRow = {
     id: catKey,
@@ -653,11 +665,8 @@ export interface CifaInputs {
   distance_one_way_km: number;
   quantity_mc: number;
   material_unit_price_mc: number;
-  cifa_capacity_mc: number;
   tube_required: boolean;
-  unloading_minutes: number;
   vat_rate: number;
-  // Rule-driven values (from supplier rule or defaults)
   supplier_id: string;
 }
 
@@ -714,25 +723,15 @@ export function calculateCifaQuote(
     };
   }
 
-  // Get rule or use defaults
   const rule = validated.cifaRule;
   const transport_per_km =
     rule?.transport_per_km_lei ?? CIFA_DEFAULTS.transport_per_km_lei;
   const min_transport =
     rule?.min_transport_lei ?? CIFA_DEFAULTS.min_transport_lei;
-  const underload_fee_per_mc =
-    rule?.underload_fee_per_mc ?? CIFA_DEFAULTS.underload_fee_per_mc;
+  const handling_per_mc =
+    rule?.handling_per_mc_lei ?? CIFA_DEFAULTS.handling_per_mc_lei;
   const tube_fee = rule?.tube_fee_lei ?? CIFA_DEFAULTS.tube_fee_lei;
-  const included_unloading_min =
-    rule?.default_included_unloading_minutes ??
-    CIFA_DEFAULTS.default_included_unloading_minutes;
-  const waiting_fee_per_min =
-    rule?.default_waiting_fee_per_min_lei ??
-    CIFA_DEFAULTS.default_waiting_fee_per_min_lei;
-  const min_capacity = rule?.min_capacity_mc ?? CIFA_DEFAULTS.min_capacity_mc;
-  const max_capacity = rule?.max_capacity_mc ?? CIFA_DEFAULTS.max_capacity_mc;
 
-  // Add rule source to assumptions
   if (rule) {
     assumptions.push(
       `Tarifare CIFA conform regulii furnizorului: ${rule.notes || rule.id}`,
@@ -743,30 +742,10 @@ export function calculateCifaQuote(
     );
   }
 
-  // Validate capacity against rule
-  if (
-    inputs.cifa_capacity_mc < min_capacity ||
-    inputs.cifa_capacity_mc > max_capacity
-  ) {
-    issues.push({
-      field: "cifa_capacity_mc",
-      message: `Capacitatea cifei (${inputs.cifa_capacity_mc} mc) trebuie să fie între ${min_capacity} și ${max_capacity} mc pentru acest furnizor.`,
-      severity: "error",
-    });
-  }
-
-  // Input validation
   if (inputs.quantity_mc <= 0) {
     issues.push({
       field: "quantity_mc",
       message: "Cantitatea trebuie să fie > 0 mc",
-      severity: "error",
-    });
-  }
-  if (inputs.cifa_capacity_mc <= 0) {
-    issues.push({
-      field: "cifa_capacity_mc",
-      message: "Capacitatea cifei trebuie să fie > 0 mc",
       severity: "error",
     });
   }
@@ -796,55 +775,31 @@ export function calculateCifaQuote(
     };
   }
 
-  // Calculate
-  const round_trip_km = inputs.distance_one_way_km * 2;
-  const transport_per_trip = Math.max(
+  // One-way distance leg + per-mc handling (additive, orientative)
+  const transport_distance_cost = Math.max(
     min_transport,
-    round_trip_km * transport_per_km,
+    inputs.distance_one_way_km * transport_per_km,
   );
-  const trips = Math.ceil(inputs.quantity_mc / inputs.cifa_capacity_mc);
-  const total_booked_mc = trips * inputs.cifa_capacity_mc;
-  const underload_mc = total_booked_mc - inputs.quantity_mc;
-  const underload_fee_total = underload_mc * underload_fee_per_mc;
+  const handling_cost = inputs.quantity_mc * handling_per_mc;
+  const transport_subtotal = transport_distance_cost + handling_cost;
   const tube_fee_total = inputs.tube_required ? tube_fee : 0;
-
-  let waiting_fee = 0;
-  if (inputs.unloading_minutes > included_unloading_min) {
-    const extra_min = inputs.unloading_minutes - included_unloading_min;
-    waiting_fee = extra_min * waiting_fee_per_min;
-  }
-
   const material_subtotal = inputs.quantity_mc * inputs.material_unit_price_mc;
-  const transport_subtotal = trips * transport_per_trip;
 
+  // Tube only here — distance + handling are rolled into transport_subtotal (single line in UI)
   const surcharge_details: { label: string; amount: number }[] = [];
-  if (underload_fee_total > 0) {
-    surcharge_details.push({
-      label: `Taxă diferență încărcare (${underload_mc.toFixed(2)} mc × ${underload_fee_per_mc} RON)`,
-      amount: underload_fee_total,
-    });
-  }
   if (tube_fee_total > 0) {
     surcharge_details.push({
       label: `Taxă tub (${tube_fee} RON)`,
       amount: tube_fee_total,
     });
   }
-  if (waiting_fee > 0) {
-    surcharge_details.push({
-      label: `Taxă staționare (${inputs.unloading_minutes - included_unloading_min} min × ${waiting_fee_per_min} RON)`,
-      amount: waiting_fee,
-    });
-  }
 
-  const surcharges_subtotal =
-    underload_fee_total + tube_fee_total + waiting_fee;
+  const surcharges_subtotal = tube_fee_total;
   const total_net =
     material_subtotal + transport_subtotal + surcharges_subtotal;
   const vat_amount = total_net * inputs.vat_rate;
   const total_gross = total_net + vat_amount;
 
-  // Assumptions
   if (validated.transportRules.length > 0) {
     const tr = validated.transportRules[0];
     assumptions.push(
@@ -857,19 +812,11 @@ export function calculateCifaQuote(
     );
   }
   assumptions.push(
-    `Capacitate cifa validată: ${min_capacity}–${max_capacity} mc.`,
+    `Distanță one-way (${inputs.distance_one_way_km.toFixed(1)} km) folosită ca preț orientativ; nu se dublează pentru întors.`,
   );
   assumptions.push(
-    `Distanță dus-întors: ${round_trip_km} km. Transport/cursă: ${transport_per_trip.toFixed(2)} RON (minim ${min_transport} RON).`,
+    `Transport = max(${min_transport}, ${inputs.distance_one_way_km.toFixed(1)} × ${transport_per_km}) + ${inputs.quantity_mc.toFixed(2)} mc × ${handling_per_mc} RON/mc manipulare.`,
   );
-  assumptions.push(
-    `Primele ${included_unloading_min} minute de descărcare sunt incluse. Taxă staționare: ${waiting_fee_per_min} RON/min.`,
-  );
-  if (underload_mc > 0) {
-    assumptions.push(
-      `Cifa de ${inputs.cifa_capacity_mc} mc × ${trips} curse = ${total_booked_mc} mc capacitate. Diferența de ${underload_mc.toFixed(2)} mc neîncărcată se taxează la ${underload_fee_per_mc} RON/mc.`,
-    );
-  }
 
   return {
     calculator_type: "CIFA",
@@ -878,7 +825,7 @@ export function calculateCifaQuote(
     validation_issues: issues,
     warnings,
     assumptions,
-    trips,
+    trips: undefined,
     material_subtotal,
     transport_subtotal,
     surcharges_subtotal,
@@ -887,7 +834,7 @@ export function calculateCifaQuote(
     vat_amount,
     vat_rate: inputs.vat_rate,
     total_gross,
-    transport_description: `${trips} cursă(e) × ${transport_per_trip.toFixed(2)} RON`,
+    transport_description: `${inputs.distance_one_way_km.toFixed(1)} km · ${inputs.quantity_mc.toFixed(2)} mc`,
   };
 }
 
@@ -1017,11 +964,10 @@ export function calculatePompaQuote(
     };
   }
 
-  // Calculate
-  const round_trip_km = inputs.distance_one_way_km * 2;
+  // One-way distance only (orientative fuel / km leg)
   const pump_transport = Math.max(
     min_transport,
-    round_trip_km * transport_per_km,
+    inputs.distance_one_way_km * transport_per_km,
   );
   const pump_service_fee =
     inputs.pumped_quantity_mc <= min_service_mc
@@ -1074,7 +1020,7 @@ export function calculatePompaQuote(
     `Primii ${included_hose_m} m de furtun sunt incluși. Fiecare 10 m suplimentar: ${extra_hose_fee_per_10m} RON.`,
   );
   assumptions.push(
-    `Transport pompă (dus-întors ${round_trip_km} km): ${pump_transport.toFixed(2)} RON (minim ${min_transport} RON).`,
+    `Transport pompă (${inputs.distance_one_way_km.toFixed(1)} km): ${pump_transport.toFixed(2)} RON (minim ${min_transport} RON).`,
   );
 
   return {
@@ -1260,7 +1206,7 @@ export function calculateBulkQuote(
     );
   }
   assumptions.push(
-    `Distanța de transport introdusă (${inputs.transport_distance_km} km) este distanța comercială totală, nu doar dus.`,
+    `Distanța introdusă (${inputs.transport_distance_km} km) — preț orientativ pe traseu.`,
   );
   assumptions.push(
     "Verificarea acoperirii se bazează pe regulile de transport și raza maximă a furnizorului, nu pe geocodare.",
@@ -1282,7 +1228,7 @@ export function calculateBulkQuote(
     vat_amount,
     vat_rate: inputs.vat_rate,
     total_gross,
-    transport_description: `${trips} cursă(e), ${inputs.transport_distance_km} km comercial`,
+    transport_description: `${trips} cursă(e), ${inputs.transport_distance_km} km`,
   };
 }
 
@@ -1646,6 +1592,7 @@ interface InputFieldProps {
   value: string | number;
   onChange: (v: string) => void;
   min?: number;
+  max?: number;
   step?: number;
   helper?: string;
   disabled?: boolean;
@@ -1659,6 +1606,7 @@ function InputField({
   value,
   onChange,
   min,
+  max,
   step,
   helper,
   disabled,
@@ -1679,6 +1627,7 @@ function InputField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           min={min}
+          max={max}
           step={step ?? (type === "number" ? 0.01 : undefined)}
           disabled={disabled}
           className={cn(
@@ -1933,7 +1882,11 @@ export interface FlowQuoteSnapshot {
   calcType: CalculatorType;
   currentQuantity: number;
   deliveryAddress: string;
+  /** Structured address parts — only set when the user selects a Nominatim suggestion. */
+  deliveryParts: GeocodeAddressParts | null;
   vatRatePercent: string;
+  /** Beton: clasă + consistență + preț unitar (flux magazin → coș). */
+  concreteSelection?: CartConcreteSelection;
 }
 
 export interface PriceCalculatorProps {
@@ -1941,8 +1894,42 @@ export interface PriceCalculatorProps {
   initialProduct?: ProductDetail | null;
   initialQty?: number;
   onFlowQuoteUpdate?: (snapshot: FlowQuoteSnapshot) => void;
-  /** Livrare / fiscal / revizuire — rendered after Verificare comercială, before quote (flow mode only) */
+  /** Livrare / fiscal / revizuire — after rezultate în flux configurare */
   flowFooter?: React.ReactNode;
+}
+
+/**
+ * Primary line = company name if set, else display name; secondary = person
+ * when both differ (magazin flow + profile pool).
+ */
+export function resolveSellerNames(
+  profile: ProfileRow | undefined,
+  product: ProductDetail | null,
+  lockSelection: boolean,
+): { primary: string; secondary: string | null } {
+  const company =
+    (lockSelection && product?.sellerCompanyName?.trim()) ||
+    profile?.company_name?.trim() ||
+    "";
+  const display =
+    (lockSelection && product?.sellerDisplayName?.trim()) ||
+    profile?.display_name?.trim() ||
+    "";
+  const primary = company || display || "Vânzător";
+  const secondary =
+    company && display && company !== display ? display : null;
+  return { primary, secondary };
+}
+
+/** Clamp numeric quantity input to max stock; returns capped string + whether capped. */
+function clampQtyToStock(raw: string, max: number | undefined): { next: string; capped: boolean } {
+  if (max == null || max <= 0 || raw === "" || raw === ".") {
+    return { next: raw, capped: false };
+  }
+  const n = parseFloat(String(raw).replace(",", "."));
+  if (Number.isNaN(n)) return { next: raw, capped: false };
+  if (n > max) return { next: String(max), capped: true };
+  return { next: raw, capped: false };
 }
 
 export default function PriceCalculator({
@@ -1992,6 +1979,10 @@ export default function PriceCalculator({
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>("");
   const [selectedListingId, setSelectedListingId] = useState<string>("");
 
+  /** Beton: clasă + consistență (doar flux magazin, listing concrete cu rânduri DB). */
+  const [concreteClassCode, setConcreteClassCode] = useState<string>("");
+  const [concreteConsistency, setConcreteConsistency] = useState<string>("");
+
   // Common
   const [vatRate, setVatRate] = useState<string>("19");
 
@@ -1999,6 +1990,8 @@ export default function PriceCalculator({
   // once the user selects an autocomplete suggestion; free-text edits clear it.
   const [deliveryAddress, setDeliveryAddress] = useState<string>("");
   const [deliveryCoords, setDeliveryCoords] = useState<LatLng | null>(null);
+  // Structured parts (street/city/county/country) from the selected suggestion.
+  const [deliveryParts, setDeliveryParts] = useState<GeocodeAddressParts | null>(null);
 
   // Origin (supplier pickup) coords. Prefer `initialProduct.pickupLat/Lng`
   // in flow mode; otherwise fall back to geocoding the listing's free-text
@@ -2022,12 +2015,15 @@ export default function PriceCalculator({
   });
 
 
-  // Cifa fields
+  // Cifa fields (capacity / unloading minutes removed — additive one-way model)
   const [cifaQtyMc, setCifaQtyMc] = useState<string>("14");
   const [cifaDistKm, setCifaDistKm] = useState<string>("15");
-  const [cifaCapacity, setCifaCapacity] = useState<string>("7");
   const [cifaTube, setCifaTube] = useState<boolean>(false);
-  const [cifaUnloadMin, setCifaUnloadMin] = useState<string>("20");
+  /** Brief message when quantity is clipped to available stock */
+  const [qtyStockHint, setQtyStockHint] = useState<string | null>(null);
+  const qtyStockHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Pompa fields
   const [pompaQtyMc, setPompaQtyMc] = useState<string>("30");
@@ -2068,6 +2064,43 @@ export default function PriceCalculator({
     }
   }, [mode, initialProduct, initialQty]);
 
+  // Prima clasă ofertată + prima consistență (auto-first pentru buyer).
+  useEffect(() => {
+    if (mode !== "flow" || !initialProduct) return;
+    if (initialProduct.listingKind !== "concrete") {
+      setConcreteClassCode("");
+      setConcreteConsistency("");
+      return;
+    }
+    const rows = initialProduct.concreteClasses ?? [];
+    if (rows.length === 0) {
+      setConcreteClassCode("");
+      setConcreteConsistency("");
+      return;
+    }
+    const offered = new Set(rows.map((r) => r.classCode));
+    const firstClass = CONCRETE_CLASS_ORDER.find((c) => offered.has(c));
+    if (!firstClass) {
+      setConcreteClassCode("");
+      setConcreteConsistency("");
+      return;
+    }
+    const row = rows.find((r) => r.classCode === firstClass);
+    const firstCons = row?.consistencies[0];
+    if (!firstCons) {
+      setConcreteClassCode("");
+      setConcreteConsistency("");
+      return;
+    }
+    setConcreteClassCode(firstClass);
+    setConcreteConsistency(firstCons);
+  }, [
+    mode,
+    initialProduct?.id,
+    initialProduct?.listingKind,
+    initialProduct?.concreteClasses?.length,
+  ]);
+
   // Manual-distance handlers: record "user touched" so the route auto-fill
   // will not clobber their edits until Restabileste is pressed. The raw
   // setters remain available for the effect below to push auto values.
@@ -2101,12 +2134,29 @@ export default function PriceCalculator({
     [profilesPool, selectedSupplierId],
   );
 
-  /** Flow + locked listing: show real account name (draft product + profile pool) */
-  const resolvedFlowSellerName = useMemo(() => {
-    const fromProduct = initialProduct?.sellerDisplayName?.trim();
-    const fromProfile = selectedSupplier?.display_name?.trim();
-    return fromProduct || fromProfile || "Furnizor";
-  }, [initialProduct, selectedSupplier]);
+  /** Company-first seller label + optional person line (flow + standalone). */
+  const sellerNames = useMemo(
+    () =>
+      resolveSellerNames(selectedSupplier, initialProduct, lockSelection),
+    [selectedSupplier, initialProduct, lockSelection],
+  );
+
+  const flashQtyStockHint = useCallback(() => {
+    setQtyStockHint("Cantitatea a fost limitată la stocul disponibil.");
+    if (qtyStockHintTimerRef.current)
+      clearTimeout(qtyStockHintTimerRef.current);
+    qtyStockHintTimerRef.current = setTimeout(() => {
+      setQtyStockHint(null);
+      qtyStockHintTimerRef.current = null;
+    }, 2000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (qtyStockHintTimerRef.current)
+        clearTimeout(qtyStockHintTimerRef.current);
+    };
+  }, []);
 
   // Origin resolution: as soon as a listing is selected, try the seller's
   // precise pickup coords; if absent, fall back to a single-shot Nominatim
@@ -2251,16 +2301,18 @@ export default function PriceCalculator({
     }
   }, [routeResult, calcType]);
 
-  // Address-select handler: store the chosen suggestion's coords (or clear
-  // on free-text edits). When cleared we also drop the current route so
-  // stale data doesn't display.
+  // Address-select handler: store the chosen suggestion's coords and structured
+  // parts (or clear on free-text edits). When cleared we also drop the current
+  // route so stale data doesn't display.
   const handleDeliveryAddressChange = useCallback(
     (value: string, coords: GeocodeResult | null) => {
       setDeliveryAddress(value);
       if (coords) {
         setDeliveryCoords({ lat: coords.lat, lng: coords.lng });
+        setDeliveryParts(coords.parts ?? null);
       } else {
         setDeliveryCoords(null);
+        setDeliveryParts(null);
         setRouteResult(null);
         setRouteError(null);
       }
@@ -2274,6 +2326,94 @@ export default function PriceCalculator({
         ? categoriesPool.find((c) => c.id === selectedListing.category_id)
         : undefined,
     [categoriesPool, selectedListing],
+  );
+
+  /** Preț unitar material: pentru beton cu rânduri DB = prețul consistenței alese, altfel prețul anunțului. */
+  const effectiveMaterialUnitPrice = useMemo(() => {
+    const fallback = selectedListing?.price ?? 0;
+    if (!initialProduct || initialProduct.listingKind !== "concrete") {
+      return fallback;
+    }
+    const rows = initialProduct.concreteClasses ?? [];
+    if (rows.length === 0 || !concreteClassCode || !concreteConsistency) {
+      return fallback;
+    }
+    const row = rows.find((r) => r.classCode === concreteClassCode);
+    if (!row) return fallback;
+    const raw =
+      row.consistencyPrices[concreteConsistency as ConcreteConsistency];
+    const n =
+      raw !== undefined && raw !== ""
+        ? parseFloat(String(raw).replace(",", "."))
+        : Number.NaN;
+    if (Number.isFinite(n) && n > 0) return n;
+    return initialProduct.price > 0 ? initialProduct.price : fallback;
+  }, [
+    initialProduct,
+    selectedListing,
+    concreteClassCode,
+    concreteConsistency,
+  ]);
+
+  /** Lipsește preț în `consistency_prices` — folosim prețul anunțului ca rezervă. */
+  const concretePriceUsesListingFallback = useMemo(() => {
+    if (!initialProduct || initialProduct.listingKind !== "concrete") {
+      return false;
+    }
+    const rows = initialProduct.concreteClasses ?? [];
+    if (rows.length === 0 || !concreteClassCode || !concreteConsistency) {
+      return false;
+    }
+    const row = rows.find((r) => r.classCode === concreteClassCode);
+    if (!row) return false;
+    const raw =
+      row.consistencyPrices[concreteConsistency as ConcreteConsistency];
+    const n =
+      raw !== undefined && raw !== ""
+        ? parseFloat(String(raw).replace(",", "."))
+        : Number.NaN;
+    return !(Number.isFinite(n) && n > 0);
+  }, [initialProduct, concreteClassCode, concreteConsistency]);
+
+  const concreteClassSelectOptions = useMemo(() => {
+    if (!initialProduct || initialProduct.listingKind !== "concrete") return [];
+    const rows = initialProduct.concreteClasses ?? [];
+    if (rows.length === 0) return [];
+    const offered = new Set(rows.map((r) => r.classCode));
+    return CONCRETE_CLASS_ORDER.filter((c) => offered.has(c)).map((c) => ({
+      value: c,
+      label: CONCRETE_CLASS_CATALOG[c].label,
+    }));
+  }, [initialProduct]);
+
+  const concreteConsistencySelectOptions = useMemo(() => {
+    if (!initialProduct || initialProduct.listingKind !== "concrete") return [];
+    const row = (initialProduct.concreteClasses ?? []).find(
+      (r) => r.classCode === concreteClassCode,
+    );
+    if (!row) return [];
+    const u = initialProduct.unit as UnitEnum;
+    return row.consistencies.map((c) => {
+      const p = row.consistencyPrices[c];
+      const priceLabel =
+        p !== undefined && p !== ""
+          ? `${p} RON/${displayUnit(u)}`
+          : "—";
+      return {
+        value: c,
+        label: `${CONSISTENCY_LABELS[c]} (${priceLabel})`,
+      };
+    });
+  }, [initialProduct, concreteClassCode]);
+
+  const handleConcreteClassChange = useCallback(
+    (code: string) => {
+      setConcreteClassCode(code);
+      const row = initialProduct?.concreteClasses?.find((r) => r.classCode === code);
+      const first = row?.consistencies[0] ?? "";
+      setConcreteConsistency(first);
+    },
+    [initialProduct],
   );
 
   // Supplier options
@@ -2334,17 +2474,9 @@ export default function PriceCalculator({
     setSelectedListingId("");
   }
 
-  // When listing changes, auto-fill capacity/price from rules
+  // When listing changes, keep selection in sync (no CIFA capacity — model is additive)
   function handleListingChange(id: string) {
     setSelectedListingId(id);
-    const listing = activeListings.find((l) => l.id === id);
-    if (!listing) return;
-    if (calcType === "CIFA" || calcType === "POMPA") {
-      const rule = getCifaRule(listing.seller_id);
-      setCifaCapacity(
-        String(rule?.default_capacity_mc ?? CIFA_DEFAULTS.default_capacity_mc),
-      );
-    }
   }
 
   const parsedVat = parseFloat(vatRate) / 100 || 0;
@@ -2404,10 +2536,8 @@ export default function PriceCalculator({
         {
           distance_one_way_km: parseFloat(cifaDistKm) || 0,
           quantity_mc: parseFloat(cifaQtyMc) || 0,
-          material_unit_price_mc: selectedListing?.price ?? 0,
-          cifa_capacity_mc: parseFloat(cifaCapacity) || 0,
+          material_unit_price_mc: effectiveMaterialUnitPrice,
           tube_required: cifaTube,
-          unloading_minutes: parseFloat(cifaUnloadMin) || 0,
           vat_rate: vat,
           supplier_id: selectedSupplierId,
         },
@@ -2416,6 +2546,9 @@ export default function PriceCalculator({
     }
 
     if (calcType === "POMPA") {
+      // TODO(beton-pompa-total): formula POMPA returnează material_subtotal: 0 — dacă în viitor
+      // dorim ca POMPA să includă mc × `effectiveMaterialUnitPrice`, modificarea trebuie făcută
+      // în `calculatePompaQuote` (regulă proiect: nu schimbăm formulele aici fără cerere explicită).
       return calculatePompaQuote(
         {
           distance_one_way_km: parseFloat(pompaDistKm) || 0,
@@ -2436,7 +2569,7 @@ export default function PriceCalculator({
         {
           transport_distance_km: parseFloat(vracDistKm) || 0,
           quantity_tons: parseFloat(vracQtyTons) || 0,
-          material_unit_price_ton: selectedListing?.price ?? 0,
+          material_unit_price_ton: effectiveMaterialUnitPrice,
           vehicle_capacity_tons: parseFloat(vracVehicleCap) || 0,
           vat_rate: vat,
           supplier_id: selectedSupplierId,
@@ -2451,7 +2584,7 @@ export default function PriceCalculator({
     return calculateDepotQuote(
       {
         quantity: parseFloat(depotQty) || 0,
-        unit_price: selectedListing?.price ?? 0,
+        unit_price: effectiveMaterialUnitPrice,
         unit: (selectedListing?.unit ?? "BUC") as UnitEnum,
         transport_mode: depotTransportMode,
         vat_rate: vat,
@@ -2468,11 +2601,10 @@ export default function PriceCalculator({
     selectedListingId,
     selectedSupplierId,
     parsedVat,
+    effectiveMaterialUnitPrice,
     cifaDistKm,
     cifaQtyMc,
-    cifaCapacity,
     cifaTube,
-    cifaUnloadMin,
     pompaDistKm,
     pompaQtyMc,
     pompaHoseM,
@@ -2487,13 +2619,28 @@ export default function PriceCalculator({
   // Push quote snapshot to parent in magazin configurare flow
   useEffect(() => {
     if (mode !== "flow" || !onFlowQuoteUpdate) return;
+    const concreteSelection: CartConcreteSelection | undefined =
+      initialProduct?.listingKind === "concrete" &&
+      (initialProduct.concreteClasses?.length ?? 0) > 0 &&
+      concreteClassCode &&
+      concreteConsistency
+        ? {
+            classCode: concreteClassCode,
+            consistency: concreteConsistency,
+            unitPrice: effectiveMaterialUnitPrice,
+            currency: initialProduct.currency,
+            unit: initialProduct.unit,
+          }
+        : undefined;
     onFlowQuoteUpdate({
       result,
       validated,
       calcType,
       currentQuantity,
       deliveryAddress,
+      deliveryParts,
       vatRatePercent: vatRate,
+      concreteSelection,
     });
   }, [
     mode,
@@ -2503,7 +2650,12 @@ export default function PriceCalculator({
     calcType,
     currentQuantity,
     deliveryAddress,
+    deliveryParts,
     vatRate,
+    initialProduct,
+    concreteClassCode,
+    concreteConsistency,
+    effectiveMaterialUnitPrice,
   ]);
 
   // Cifa rule for hints
@@ -2541,6 +2693,43 @@ export default function PriceCalculator({
 
   const isFlow = mode === "flow";
 
+  /** Max orderable qty = listing stock (undefined = no cap in UI). */
+  const stockCap =
+    selectedListing != null ? selectedListing.available_qty : undefined;
+
+  const setCifaQtyClamped = useCallback(
+    (raw: string) => {
+      const { next, capped } = clampQtyToStock(raw, stockCap);
+      setCifaQtyMc(next);
+      if (capped) flashQtyStockHint();
+    },
+    [stockCap, flashQtyStockHint],
+  );
+  const setPompaQtyClamped = useCallback(
+    (raw: string) => {
+      const { next, capped } = clampQtyToStock(raw, stockCap);
+      setPompaQtyMc(next);
+      if (capped) flashQtyStockHint();
+    },
+    [stockCap, flashQtyStockHint],
+  );
+  const setVracQtyClamped = useCallback(
+    (raw: string) => {
+      const { next, capped } = clampQtyToStock(raw, stockCap);
+      setVracQtyTons(next);
+      if (capped) flashQtyStockHint();
+    },
+    [stockCap, flashQtyStockHint],
+  );
+  const setDepotQtyClamped = useCallback(
+    (raw: string) => {
+      const { next, capped } = clampQtyToStock(raw, stockCap);
+      setDepotQty(next);
+      if (capped) flashQtyStockHint();
+    },
+    [stockCap, flashQtyStockHint],
+  );
+
   // Standalone: no product context — full flow starts from magazin → configurare
   if (mode === "standalone" && !initialProduct) {
     return (
@@ -2558,6 +2747,321 @@ export default function PriceCalculator({
         >
           Deschide magazinul
         </Link>
+      </div>
+    );
+  }
+
+  /** Quote + validation + material + ipoteze (shared layout for flow vs standalone). */
+  function ResultsPane() {
+    const assumptionsFooter =
+      "Estimare comercială orientativă. Taxele suplimentare se aplică conform regulilor furnizorului. Prețurile finale pot varia în funcție de condițiile specifice ale comenzii.";
+    return (
+      <div className="flex flex-col gap-4">
+        {!hasValidSelection && (
+          <div className="rounded-xl border-2 border-dashed border-zinc-200 bg-zinc-50/50 p-8 text-center">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-zinc-100">
+              <IconRoute className="h-6 w-6 text-zinc-400" />
+            </div>
+            <p className="text-sm font-medium text-zinc-600">
+              Selectați un vânzător și un material
+            </p>
+            <p className="mx-auto mt-1 max-w-xs text-xs text-zinc-400">
+              După selectare, sistemul afișează eligibilitatea, regulile de
+              transport și costul estimat.
+            </p>
+          </div>
+        )}
+
+        {hasValidSelection && (
+          <div
+            className={cn(
+              "rounded-xl border-2 p-4",
+              result.is_valid && !result.is_manual
+                ? "border-emerald-200 bg-emerald-50"
+                : result.is_valid && result.is_manual
+                  ? "border-amber-200 bg-amber-50"
+                  : "border-red-200 bg-red-50",
+            )}
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className={cn(
+                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
+                  result.is_valid && !result.is_manual
+                    ? "bg-emerald-500"
+                    : result.is_valid && result.is_manual
+                      ? "bg-amber-500"
+                      : "bg-red-500",
+                )}
+              >
+                {result.is_valid && !result.is_manual && (
+                  <IconCheck className="h-5 w-5 text-white" />
+                )}
+                {result.is_valid && result.is_manual && (
+                  <IconWarning className="h-5 w-5 text-white" />
+                )}
+                {!result.is_valid && <IconX className="h-5 w-5 text-white" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p
+                  className={cn(
+                    "text-sm font-semibold",
+                    result.is_valid && !result.is_manual
+                      ? "text-emerald-800"
+                      : result.is_valid && result.is_manual
+                        ? "text-amber-800"
+                        : "text-red-800",
+                  )}
+                >
+                  {result.is_valid && !result.is_manual
+                    ? "Eligibil — calcul automat"
+                    : result.is_valid && result.is_manual
+                      ? "Calcul parțial — transport manual"
+                      : "Calcul indisponibil"}
+                </p>
+                {result.manual_reason && (
+                  <p
+                    className={cn(
+                      "mt-0.5 text-xs",
+                      result.is_valid ? "text-amber-700" : "text-red-700",
+                    )}
+                  >
+                    {result.manual_reason}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {hasValidSelection &&
+          (result.is_valid || result.material_subtotal !== undefined) && (
+            <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+              <div className="bg-zinc-900 p-4 text-white">
+                <div className="flex items-end justify-between">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-zinc-400">
+                      Total cu TVA
+                    </p>
+                    <p className="mt-1 text-3xl font-bold font-mono tabular-nums">
+                      {result.total_gross !== undefined
+                        ? fmt(result.total_gross, 2)
+                        : "—"}
+                      <span className="ml-1 text-base font-normal text-zinc-400">
+                        RON
+                      </span>
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] text-zinc-400">fără TVA</p>
+                    <p className="text-lg font-semibold font-mono tabular-nums">
+                      {fmtCurrency(result.total_net)}
+                    </p>
+                  </div>
+                </div>
+                {result.is_manual && (
+                  <div className="mt-3 border-t border-zinc-700 pt-3">
+                    <p className="flex items-center gap-1.5 text-[10px] text-amber-400">
+                      <IconWarning className="h-3.5 w-3.5" />
+                      Totalul NU include transportul — ofertă manuală
+                      necesară
+                    </p>
+                  </div>
+                )}
+              </div>
+              <div className="p-4">
+                <div className="mb-3 flex items-center gap-2 text-[10px] text-zinc-500">
+                  <Badge variant={result.is_manual ? "warning" : "success"}>
+                    {result.is_manual ? "Transport manual" : "Calcul complet"}
+                  </Badge>
+                  {result.transport_description && (
+                    <span className="text-zinc-400">
+                      • {result.transport_description}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-col divide-y divide-zinc-100">
+                  {result.trips !== undefined && result.trips > 0 && (
+                    <div className="flex justify-between py-2">
+                      <span className="text-sm text-zinc-500">Număr curse</span>
+                      <span className="font-mono text-sm font-medium text-zinc-900 tabular-nums">
+                        {result.trips}
+                      </span>
+                    </div>
+                  )}
+                  {calcType !== "POMPA" &&
+                    result.material_subtotal !== undefined && (
+                      <div className="flex justify-between py-2">
+                        <span className="text-sm text-zinc-500">Materiale</span>
+                        <span className="font-mono text-sm font-medium text-zinc-900 tabular-nums">
+                          {fmtCurrency(result.material_subtotal)}
+                        </span>
+                      </div>
+                    )}
+                  {result.transport_subtotal !== undefined && (
+                    <div className="flex justify-between py-2">
+                      <span className="text-sm text-zinc-500">Transport</span>
+                      <span
+                        className={cn(
+                          "font-mono text-sm font-medium tabular-nums",
+                          result.is_manual ? "text-amber-600" : "text-zinc-900",
+                        )}
+                      >
+                        {result.is_manual
+                          ? "Ofertă manuală"
+                          : fmtCurrency(result.transport_subtotal)}
+                      </span>
+                    </div>
+                  )}
+                  {result.surcharge_details &&
+                    result.surcharge_details.length > 0 && (
+                      <>
+                        <div className="py-2">
+                          <p className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">
+                            Taxe suplimentare
+                          </p>
+                          {result.surcharge_details.map((sd, i) => (
+                            <div
+                              key={i}
+                              className="flex justify-between py-1"
+                            >
+                              <span className="text-xs text-zinc-400">
+                                {sd.label}
+                              </span>
+                              <span className="font-mono text-xs font-medium text-zinc-700 tabular-nums">
+                                {fmtCurrency(sd.amount)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  <div className="flex justify-between py-2">
+                    <span className="text-sm text-zinc-500">
+                      TVA ({((result.vat_rate ?? 0) * 100).toFixed(0)}%)
+                    </span>
+                    <span className="font-mono text-sm font-medium text-zinc-900 tabular-nums">
+                      {fmtCurrency(result.vat_amount)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+        {hasValidSelection && result.validation_issues.length > 0 && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <IconX className="h-4 w-4 text-red-500" />
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-red-700">
+                Probleme de validare
+              </h4>
+            </div>
+            <div className="flex flex-col gap-2">
+              {result.validation_issues.map((iss, i) => (
+                <div
+                  key={i}
+                  className="flex items-start gap-2 text-sm text-red-700"
+                >
+                  <span className="mt-0.5 text-red-400">•</span>
+                  <span>{iss.message}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {hasValidSelection &&
+          result.warnings &&
+          result.warnings.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <IconWarning className="h-4 w-4 text-amber-500" />
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-amber-700">
+                  Avertismente
+                </h4>
+              </div>
+              <div className="flex flex-col gap-2">
+                {result.warnings.map((w, i) => (
+                  <div
+                    key={i}
+                    className="flex items-start gap-2 text-sm text-amber-700"
+                  >
+                    <span className="mt-0.5 text-amber-400">•</span>
+                    <span>{w}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+        {selectedListing && (
+          <div className="rounded-xl border border-zinc-200 bg-white p-4">
+            <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              Material selectat
+            </h4>
+            <div className="flex gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-zinc-100">
+                {calcType === "CIFA" && (
+                  <IconTruck className="h-6 w-6 text-zinc-400" />
+                )}
+                {calcType === "POMPA" && (
+                  <IconPump className="h-6 w-6 text-zinc-400" />
+                )}
+                {calcType === "VRAC" && (
+                  <IconBulk className="h-6 w-6 text-zinc-400" />
+                )}
+                {calcType === "DEPOZIT" && (
+                  <IconWarehouse className="h-6 w-6 text-zinc-400" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-zinc-900">
+                  {selectedListing.title}
+                </p>
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  {sellerNames.primary} • {selectedListing.location}
+                </p>
+                <div className="mt-2 flex items-center gap-3">
+                  <span className="font-mono text-sm font-semibold text-zinc-900 tabular-nums">
+                    {isFlow &&
+                    initialProduct?.listingKind === "concrete" &&
+                    concreteClassSelectOptions.length > 0
+                      ? effectiveMaterialUnitPrice
+                      : selectedListing.price}{" "}
+                    RON/
+                    {displayUnit(selectedListing.unit)}
+                  </span>
+                  <span className="text-xs text-zinc-400">
+                    Stoc: {selectedListing.available_qty}{" "}
+                    {displayUnit(selectedListing.unit)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {hasValidSelection && (
+            <div className="rounded-xl border border-sky-200 bg-sky-50 p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <IconInfo className="h-4 w-4 text-sky-500" />
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-sky-700">
+                  Ipoteze aplicate
+                </h4>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {result.assumptions?.map((a, i) => (
+                  <p key={i} className="text-xs leading-relaxed text-sky-700">
+                    {a}
+                  </p>
+                ))}
+                <p className="mt-2 border-t border-sky-200/80 pt-2 text-[10px] leading-relaxed text-sky-800/80">
+                  {assumptionsFooter}
+                </p>
+              </div>
+            </div>
+          )}
       </div>
     );
   }
@@ -2620,7 +3124,7 @@ export default function PriceCalculator({
                 {CALC_TYPES.find((c) => c.value === calcType)?.label}
               </Badge>
               {selectedSupplier && (
-                <Badge variant="info">{selectedSupplier.display_name}</Badge>
+                <Badge variant="info">{sellerNames.primary}</Badge>
               )}
               {transportRules.length > 0 && (
                 <Badge variant="default">
@@ -2654,7 +3158,7 @@ export default function PriceCalculator({
             isFlow ? "flex-col gap-8" : "flex-col lg:flex-row",
           )}
         >
-          {/* LEFT COLUMN: steps 1–5 — wider cap in flow configurare */}
+          {/* LEFT COLUMN: steps 1–4 — wider cap in flow configurare */}
           <div
             className={cn(
               "flex w-full flex-col gap-4",
@@ -2716,7 +3220,7 @@ export default function PriceCalculator({
             </StepSection>
 
             {/* Step 2: Supplier & Material */}
-            <StepSection step={2} title="Furnizor și material">
+            <StepSection step={2} title="Vânzător și material">
               <div className="flex flex-col gap-4">
                 {lockSelection && initialProduct ? (
                   <div className="flex flex-col gap-1.5">
@@ -2726,12 +3230,17 @@ export default function PriceCalculator({
                     <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-3">
                       <div className="flex items-start gap-3">
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-semibold text-zinc-600">
-                          {resolvedFlowSellerName.charAt(0).toUpperCase()}
+                          {sellerNames.primary.charAt(0).toUpperCase()}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-zinc-900">
-                            {resolvedFlowSellerName}
+                          <p className="text-sm font-semibold text-zinc-900">
+                            {sellerNames.primary}
                           </p>
+                          {sellerNames.secondary && (
+                            <p className="text-xs text-zinc-500">
+                              {sellerNames.secondary}
+                            </p>
+                          )}
                           {(selectedSupplier?.phone ||
                             initialProduct.sellerPhone) && (
                             <div className="mt-0.5 flex items-center gap-1">
@@ -2761,16 +3270,49 @@ export default function PriceCalculator({
                         </div>
                       )}
                     </div>
+                    {/* Beton: până la 7 clase standard + consistențe cu prețuri din DB */}
+                    {initialProduct.listingKind === "concrete" &&
+                      concreteClassSelectOptions.length > 0 && (
+                        <div className="mt-3 flex flex-col gap-3 border-t border-zinc-200 pt-3">
+                          <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                            Beton comandat
+                          </span>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <SelectField
+                              label="Clasă"
+                              id="buyer-concrete-class"
+                              value={concreteClassCode}
+                              onChange={handleConcreteClassChange}
+                              options={concreteClassSelectOptions}
+                              placeholder="—"
+                            />
+                            <SelectField
+                              label="Consistență"
+                              id="buyer-concrete-consistency"
+                              value={concreteConsistency}
+                              onChange={setConcreteConsistency}
+                              options={concreteConsistencySelectOptions}
+                              placeholder="—"
+                            />
+                          </div>
+                          {concretePriceUsesListingFallback && (
+                            <p className="text-[10px] text-amber-800 dark:text-amber-200">
+                              Preț lipsă pentru combinația aleasă — folosim
+                              prețul afișat pe anunț.
+                            </p>
+                          )}
+                        </div>
+                      )}
                   </div>
                 ) : (
                   <>
                     <SelectField
-                      label="Furnizor"
+                      label="Vânzător"
                       id="supplier"
                       value={selectedSupplierId}
                       onChange={handleSupplierChange}
                       options={supplierOptions}
-                      placeholder="Selectează furnizor..."
+                      placeholder="Selectează vânzătorul..."
                       disabled={lockSelection}
                     />
 
@@ -2778,14 +3320,17 @@ export default function PriceCalculator({
                       <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-3">
                         <div className="flex items-start gap-3">
                           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-semibold text-zinc-600">
-                            {(selectedSupplier.display_name || "?")
-                              .charAt(0)
-                              .toUpperCase()}
+                            {sellerNames.primary.charAt(0).toUpperCase()}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-zinc-900">
-                              {selectedSupplier.display_name}
+                            <p className="text-sm font-semibold text-zinc-900">
+                              {sellerNames.primary}
                             </p>
+                            {sellerNames.secondary && (
+                              <p className="text-xs text-zinc-500">
+                                {sellerNames.secondary}
+                              </p>
+                            )}
                             {selectedSupplier.phone && (
                               <div className="mt-0.5 flex items-center gap-1">
                                 <IconPhone className="h-3 w-3 text-zinc-400" />
@@ -2826,7 +3371,7 @@ export default function PriceCalculator({
                   placeholder={
                     selectedSupplierId
                       ? "Selectează material..."
-                      : "Selectați mai întâi furnizorul"
+                      : "Selectați mai întâi vânzătorul"
                   }
                   disabled={lockSelection}
                 />
@@ -2834,25 +3379,60 @@ export default function PriceCalculator({
                 {selectedListing && (
                   <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-3">
                     <div className="flex justify-between items-start gap-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-zinc-900 truncate">
-                          {selectedListing.title}
-                        </p>
-                        <p className="text-[10px] text-zinc-400 mt-0.5">
-                          {selectedCategory?.name ?? "—"}
-                        </p>
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        {lockSelection &&
+                        initialProduct?.listingKind === "concrete" &&
+                        concreteClassSelectOptions.length > 0 ? (
+                          <>
+                            <p className="text-sm font-medium text-zinc-700">
+                              {concreteClassCode in CONCRETE_CLASS_CATALOG
+                                ? CONCRETE_CLASS_CATALOG[
+                                    concreteClassCode as keyof typeof CONCRETE_CLASS_CATALOG
+                                  ].label
+                                : concreteClassCode}{" "}
+                              ·{" "}
+                              {concreteConsistency in CONSISTENCY_LABELS
+                                ? CONSISTENCY_LABELS[
+                                    concreteConsistency as ConcreteConsistency
+                                  ]
+                                : concreteConsistency}
+                            </p>
+                            <p className="text-xs text-zinc-500">
+                              Categorie: {selectedCategory?.name ?? "—"}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-sm font-medium text-zinc-700">
+                            Categorie: {selectedCategory?.name ?? "—"}
+                          </p>
+                        )}
                       </div>
-                      <div className="text-right shrink-0">
+                      <div className="flex shrink-0 flex-col items-end gap-2 text-right">
                         <p className="text-base font-semibold text-zinc-900 font-mono tabular-nums">
-                          {selectedListing.price}{" "}
+                          {(lockSelection &&
+                          initialProduct?.listingKind === "concrete" &&
+                          concreteClassSelectOptions.length > 0
+                            ? effectiveMaterialUnitPrice
+                            : selectedListing.price)}{" "}
                           <span className="text-xs text-zinc-500">
                             RON/{displayUnit(selectedListing.unit)}
                           </span>
                         </p>
-                        <p className="text-[10px] text-zinc-400">
-                          Stoc: {selectedListing.available_qty}{" "}
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold tabular-nums",
+                            selectedListing.available_qty <= 5 ||
+                              (lockSelection &&
+                                initialProduct?.minOrderQty != null &&
+                                selectedListing.available_qty <=
+                                  initialProduct.minOrderQty)
+                              ? "border-amber-200 bg-amber-50 text-amber-800"
+                              : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                          )}
+                        >
+                          Stoc disponibil: {selectedListing.available_qty}{" "}
                           {displayUnit(selectedListing.unit)}
-                        </p>
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -2883,8 +3463,8 @@ export default function PriceCalculator({
                     <IconMapPin className="w-4 h-4 text-zinc-400 shrink-0" />
                     <span className="text-sm text-zinc-700">
                       {selectedListing
-                        ? `${resolvedFlowSellerName}, ${selectedListing.location}`
-                        : "Selectați un furnizor"}
+                        ? `${sellerNames.primary}, ${selectedListing.location}`
+                        : "Selectați un vânzător"}
                     </span>
                   </div>
                 </div>
@@ -2908,8 +3488,8 @@ export default function PriceCalculator({
                       placeholder="Oraș, stradă, număr..."
                     />
                     <p className="text-[10px] text-zinc-400 mt-1.5">
-                      Geocodare OpenStreetMap. Selectați o sugestie pentru a
-                      calcula ruta rutieră.
+                      Selectați o sugestie pentru a calcula ruta rutieră și a
+                      completa automat strada, localitatea și județul mai jos.
                     </p>
                   </div>
                 </div>
@@ -2974,9 +3554,6 @@ export default function PriceCalculator({
                           km
                         </p>
                         <div className="flex items-center justify-end gap-1.5">
-                          <p className="text-[10px] text-zinc-400">
-                            {calcType === "VRAC" ? "comercial" : "dus"}
-                          </p>
                           {routeResult &&
                             calcType !== "DEPOZIT" &&
                             !distanceTouchedRef.current[calcType] && (
@@ -3003,24 +3580,13 @@ export default function PriceCalculator({
 
                 {/* Route summary */}
                 {hasValidSelection && transportRules.length > 0 && (
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-3">
                     <div className="rounded-md bg-zinc-100 p-2 text-center">
                       <p className="text-[10px] text-zinc-500 uppercase tracking-wider">
                         Distanță
                       </p>
                       <p className="text-sm font-semibold text-zinc-900 font-mono">
                         {currentDistance} km
-                      </p>
-                    </div>
-                    <div className="rounded-md bg-zinc-100 p-2 text-center">
-                      <p className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                        Dus-întors
-                      </p>
-                      <p className="text-sm font-semibold text-zinc-900 font-mono">
-                        {calcType !== "VRAC"
-                          ? currentDistance * 2
-                          : currentDistance}{" "}
-                        km
                       </p>
                     </div>
                     <div className="rounded-md bg-zinc-100 p-2 text-center">
@@ -3059,18 +3625,26 @@ export default function PriceCalculator({
                       label="Cantitate"
                       id="cifa_qty"
                       value={cifaQtyMc}
-                      onChange={setCifaQtyMc}
+                      onChange={setCifaQtyClamped}
                       min={0}
+                      max={stockCap}
                       step={0.5}
                       suffix="mc"
                       helper={
-                        validated.minimumOrderRule
-                          ? `Min: ${validated.minimumOrderRule.min_order_qty} mc`
-                          : undefined
+                        [
+                          validated.minimumOrderRule
+                            ? `Min: ${validated.minimumOrderRule.min_order_qty} mc`
+                            : null,
+                          stockCap != null
+                            ? `Max stoc: ${stockCap} mc`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || undefined
                       }
                     />
                     <InputField
-                      label="Distanță dus"
+                      label="Distanță"
                       id="cifa_dist"
                       value={cifaDistKm}
                       onChange={handleCifaDistChange}
@@ -3083,36 +3657,19 @@ export default function PriceCalculator({
                           : undefined
                       }
                     />
-                    <InputField
-                      label="Capacitate cifa"
-                      id="cifa_cap"
-                      value={cifaCapacity}
-                      onChange={setCifaCapacity}
-                      min={1}
-                      step={0.5}
-                      suffix="mc"
-                      helper={
-                        cifaRule
-                          ? `${cifaRule.min_capacity_mc}–${cifaRule.max_capacity_mc} mc`
-                          : `${CIFA_DEFAULTS.min_capacity_mc}–${CIFA_DEFAULTS.max_capacity_mc} mc`
-                      }
-                    />
-                    <InputField
-                      label="Minute descărcare"
-                      id="cifa_unload_min"
-                      value={cifaUnloadMin}
-                      onChange={setCifaUnloadMin}
-                      min={0}
-                      step={1}
-                      suffix="min"
-                      helper={`Inclus: ${cifaRule?.default_included_unloading_minutes ?? CIFA_DEFAULTS.default_included_unloading_minutes} min`}
-                    />
                   </div>
                   <div className="flex items-center justify-between py-2 px-3 rounded-md bg-zinc-50 border border-zinc-100">
+                    {/* Pentru beton cu rânduri DB folosește prețul consistenței alese (efectiv); altfel preț listing. */}
                     <InputField
                       label="Preț material"
                       id="cifa_price"
-                      value={selectedListing?.price ?? ""}
+                      value={
+                        isFlow &&
+                        initialProduct?.listingKind === "concrete" &&
+                        concreteClassSelectOptions.length > 0
+                          ? effectiveMaterialUnitPrice
+                          : (selectedListing?.price ?? "")
+                      }
                       onChange={() => {}}
                       disabled
                       suffix="RON/mc"
@@ -3129,22 +3686,17 @@ export default function PriceCalculator({
                     <div className="flex items-start gap-2">
                       <IconInfo className="w-4 h-4 text-sky-500 mt-0.5 shrink-0" />
                       <div className="text-[11px] text-sky-700 leading-relaxed">
-                        <strong>Regulă transport CIFA:</strong>{" "}
+                        <strong>Regulă CIFA:</strong>{" "}
                         {cifaRule?.transport_per_km_lei ??
                           CIFA_DEFAULTS.transport_per_km_lei}{" "}
                         RON/km (minim{" "}
                         {cifaRule?.min_transport_lei ??
                           CIFA_DEFAULTS.min_transport_lei}{" "}
-                        RON/cursă). Diferență încărcare:{" "}
-                        {cifaRule?.underload_fee_per_mc ??
-                          CIFA_DEFAULTS.underload_fee_per_mc}{" "}
-                        RON/mc. Staționare:{" "}
-                        {cifaRule?.default_waiting_fee_per_min_lei ??
-                          CIFA_DEFAULTS.default_waiting_fee_per_min_lei}{" "}
-                        RON/min după{" "}
-                        {cifaRule?.default_included_unloading_minutes ??
-                          CIFA_DEFAULTS.default_included_unloading_minutes}{" "}
-                        min.
+                        RON/cursă) +{" "}
+                        {cifaRule?.handling_per_mc_lei ??
+                          CIFA_DEFAULTS.handling_per_mc_lei}{" "}
+                        RON/mc manipulare. Distanța se taxează doar dus (fără
+                        dublare întors).
                       </div>
                     </div>
                   </div>
@@ -3158,13 +3710,17 @@ export default function PriceCalculator({
                       label="Cantitate pompată"
                       id="pompa_qty"
                       value={pompaQtyMc}
-                      onChange={setPompaQtyMc}
+                      onChange={setPompaQtyClamped}
                       min={0}
+                      max={stockCap}
                       step={0.5}
                       suffix="mc"
+                      helper={
+                        stockCap != null ? `Max stoc: ${stockCap} mc` : undefined
+                      }
                     />
                     <InputField
-                      label="Distanță dus"
+                      label="Distanță"
                       id="pompa_dist"
                       value={pompaDistKm}
                       onChange={handlePompaDistChange}
@@ -3231,18 +3787,24 @@ export default function PriceCalculator({
                       label="Cantitate"
                       id="vrac_qty"
                       value={vracQtyTons}
-                      onChange={setVracQtyTons}
+                      onChange={setVracQtyClamped}
                       min={0}
+                      max={stockCap}
                       step={0.5}
                       suffix="tone"
                       helper={
-                        validated.minimumOrderRule
-                          ? `Min: ${validated.minimumOrderRule.min_order_qty} t`
-                          : undefined
+                        [
+                          validated.minimumOrderRule
+                            ? `Min: ${validated.minimumOrderRule.min_order_qty} t`
+                            : null,
+                          stockCap != null ? `Max stoc: ${stockCap} t` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || undefined
                       }
                     />
                     <InputField
-                      label="Distanță comercială"
+                      label="Distanță"
                       id="vrac_dist"
                       value={vracDistKm}
                       onChange={handleVracDistChange}
@@ -3252,7 +3814,7 @@ export default function PriceCalculator({
                       helper={
                         transportRules.length > 0
                           ? `Max: ${transportRules[0].max_radius_km} km`
-                          : "Total (nu doar dus)"
+                          : undefined
                       }
                     />
                     <InputField
@@ -3311,13 +3873,21 @@ export default function PriceCalculator({
                       label={`Cantitate (${selectedListing ? displayUnit(selectedListing.unit) : "buc"})`}
                       id="depot_qty"
                       value={depotQty}
-                      onChange={setDepotQty}
+                      onChange={setDepotQtyClamped}
                       min={0}
+                      max={stockCap}
                       step={1}
                       helper={
-                        validated.minimumOrderRule
-                          ? `Min: ${validated.minimumOrderRule.min_order_qty} ${displayUnit(validated.minimumOrderRule.unit)}`
-                          : undefined
+                        [
+                          validated.minimumOrderRule
+                            ? `Min: ${validated.minimumOrderRule.min_order_qty} ${displayUnit(validated.minimumOrderRule.unit)}`
+                            : null,
+                          stockCap != null
+                            ? `Max stoc: ${stockCap} ${selectedListing ? displayUnit(selectedListing.unit) : ""}`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || undefined
                       }
                     />
                     <div className="flex flex-col gap-1.5">
@@ -3376,369 +3946,26 @@ export default function PriceCalculator({
                   </div>
                 </div>
               )}
+              {qtyStockHint && (
+                <p className="text-[10px] font-medium text-amber-700">
+                  {qtyStockHint}
+                </p>
+              )}
             </StepSection>
+          </div>
 
-            {/* Step 5: Verification */}
-            <StepSection
-              step={5}
-              title="Verificare comercială"
-              isActive={!!hasValidSelection}
-            >
-              <div className="flex flex-col gap-3">
-                <InputField
-                  label="Cotă TVA"
-                  id="vat"
-                  value={vatRate}
-                  onChange={setVatRate}
-                  min={0}
-                  step={1}
-                  suffix="%"
-                  helper="Cota TVA aplicabilă (ex: 19)"
-                />
-                <div className="text-[10px] text-zinc-400 border-t border-zinc-100 pt-3">
-                  Estimare comercială orientativă. Taxele suplimentare se aplică
-                  conform regulilor furnizorului. Prețurile finale pot varia în
-                  funcție de condițiile specifice ale comenzii.
-                </div>
+          {isFlow ? (
+            <>
+              <div className="flex w-full max-w-3xl flex-col gap-4">
+                <ResultsPane />
               </div>
-            </StepSection>
-          </div>
-
-          {isFlow && flowFooter}
-
-          {/* RIGHT COLUMN: Results — full width below footer in flow; sticky side panel in standalone */}
-          <div
-            className={cn(
-              "min-w-0",
-              isFlow ? "w-full max-w-3xl" : "flex-1 lg:sticky lg:top-24",
-            )}
-          >
-            <div className="flex flex-col gap-4">
-              {/* Empty state */}
-              {!hasValidSelection && (
-                <div className="rounded-xl border-2 border-dashed border-zinc-200 bg-zinc-50/50 p-8 text-center">
-                  <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center mx-auto mb-3">
-                    <IconRoute className="w-6 h-6 text-zinc-400" />
-                  </div>
-                  <p className="text-sm font-medium text-zinc-600">
-                    Selectați un furnizor și un material
-                  </p>
-                  <p className="text-xs text-zinc-400 mt-1 max-w-xs mx-auto">
-                    După selectare, sistemul afișează eligibilitatea, regulile
-                    de transport și costul estimat.
-                  </p>
-                </div>
-              )}
-
-              {/* Status banner */}
-              {hasValidSelection && (
-                <div
-                  className={cn(
-                    "rounded-xl border-2 p-4",
-                    result.is_valid && !result.is_manual
-                      ? "border-emerald-200 bg-emerald-50"
-                      : result.is_valid && result.is_manual
-                        ? "border-amber-200 bg-amber-50"
-                        : "border-red-200 bg-red-50",
-                  )}
-                >
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={cn(
-                        "w-10 h-10 rounded-full flex items-center justify-center shrink-0",
-                        result.is_valid && !result.is_manual
-                          ? "bg-emerald-500"
-                          : result.is_valid && result.is_manual
-                            ? "bg-amber-500"
-                            : "bg-red-500",
-                      )}
-                    >
-                      {result.is_valid && !result.is_manual && (
-                        <IconCheck className="w-5 h-5 text-white" />
-                      )}
-                      {result.is_valid && result.is_manual && (
-                        <IconWarning className="w-5 h-5 text-white" />
-                      )}
-                      {!result.is_valid && (
-                        <IconX className="w-5 h-5 text-white" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p
-                        className={cn(
-                          "text-sm font-semibold",
-                          result.is_valid && !result.is_manual
-                            ? "text-emerald-800"
-                            : result.is_valid && result.is_manual
-                              ? "text-amber-800"
-                              : "text-red-800",
-                        )}
-                      >
-                        {result.is_valid && !result.is_manual
-                          ? "Eligibil — calcul automat"
-                          : result.is_valid && result.is_manual
-                            ? "Calcul parțial — transport manual"
-                            : "Calcul indisponibil"}
-                      </p>
-                      {result.manual_reason && (
-                        <p
-                          className={cn(
-                            "text-xs mt-0.5",
-                            result.is_valid ? "text-amber-700" : "text-red-700",
-                          )}
-                        >
-                          {result.manual_reason}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Total summary card */}
-              {hasValidSelection &&
-                (result.is_valid || result.material_subtotal !== undefined) && (
-                  <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
-                    <div className="bg-zinc-900 text-white p-4">
-                      <div className="flex items-end justify-between">
-                        <div>
-                          <p className="text-[10px] uppercase tracking-wider text-zinc-400">
-                            Total cu TVA
-                          </p>
-                          <p className="text-3xl font-bold font-mono tabular-nums mt-1">
-                            {result.total_gross !== undefined
-                              ? fmt(result.total_gross, 2)
-                              : "—"}
-                            <span className="text-base font-normal text-zinc-400 ml-1">
-                              RON
-                            </span>
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[10px] text-zinc-400">fără TVA</p>
-                          <p className="text-lg font-semibold font-mono tabular-nums">
-                            {fmtCurrency(result.total_net)}
-                          </p>
-                        </div>
-                      </div>
-                      {result.is_manual && (
-                        <div className="mt-3 pt-3 border-t border-zinc-700">
-                          <p className="text-[10px] text-amber-400 flex items-center gap-1.5">
-                            <IconWarning className="w-3.5 h-3.5" />
-                            Totalul NU include transportul — ofertă manuală
-                            necesară
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                    <div className="p-4">
-                      <div className="flex items-center gap-2 text-[10px] text-zinc-500 mb-3">
-                        <Badge
-                          variant={result.is_manual ? "warning" : "success"}
-                        >
-                          {result.is_manual
-                            ? "Transport manual"
-                            : "Calcul complet"}
-                        </Badge>
-                        {result.transport_description && (
-                          <span className="text-zinc-400">
-                            • {result.transport_description}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex flex-col divide-y divide-zinc-100">
-                        {result.trips !== undefined && (
-                          <div className="flex justify-between py-2">
-                            <span className="text-sm text-zinc-500">
-                              Număr curse
-                            </span>
-                            <span className="text-sm font-medium text-zinc-900 font-mono">
-                              {result.trips}
-                            </span>
-                          </div>
-                        )}
-                        {calcType !== "POMPA" &&
-                          result.material_subtotal !== undefined && (
-                            <div className="flex justify-between py-2">
-                              <span className="text-sm text-zinc-500">
-                                Materiale
-                              </span>
-                              <span className="text-sm font-medium text-zinc-900 font-mono">
-                                {fmtCurrency(result.material_subtotal)}
-                              </span>
-                            </div>
-                          )}
-                        {result.transport_subtotal !== undefined && (
-                          <div className="flex justify-between py-2">
-                            <span className="text-sm text-zinc-500">
-                              Transport
-                            </span>
-                            <span
-                              className={cn(
-                                "text-sm font-medium font-mono",
-                                result.is_manual
-                                  ? "text-amber-600"
-                                  : "text-zinc-900",
-                              )}
-                            >
-                              {result.is_manual
-                                ? "Ofertă manuală"
-                                : fmtCurrency(result.transport_subtotal)}
-                            </span>
-                          </div>
-                        )}
-                        {result.surcharge_details &&
-                          result.surcharge_details.length > 0 && (
-                            <>
-                              <div className="py-2">
-                                <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1">
-                                  Taxe suplimentare
-                                </p>
-                                {result.surcharge_details.map((sd, i) => (
-                                  <div
-                                    key={i}
-                                    className="flex justify-between py-1"
-                                  >
-                                    <span className="text-xs text-zinc-400">
-                                      {sd.label}
-                                    </span>
-                                    <span className="text-xs font-medium text-zinc-700 font-mono">
-                                      {fmtCurrency(sd.amount)}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            </>
-                          )}
-                        <div className="flex justify-between py-2">
-                          <span className="text-sm text-zinc-500">
-                            TVA ({((result.vat_rate ?? 0) * 100).toFixed(0)}%)
-                          </span>
-                          <span className="text-sm font-medium text-zinc-900 font-mono">
-                            {fmtCurrency(result.vat_amount)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-              {/* Validation issues */}
-              {hasValidSelection && result.validation_issues.length > 0 && (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <IconX className="w-4 h-4 text-red-500" />
-                    <h4 className="text-xs font-semibold text-red-700 uppercase tracking-wider">
-                      Probleme de validare
-                    </h4>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {result.validation_issues.map((iss, i) => (
-                      <div
-                        key={i}
-                        className="flex items-start gap-2 text-sm text-red-700"
-                      >
-                        <span className="text-red-400 mt-0.5">•</span>
-                        <span>{iss.message}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Warnings */}
-              {hasValidSelection &&
-                result.warnings &&
-                result.warnings.length > 0 && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <IconWarning className="w-4 h-4 text-amber-500" />
-                      <h4 className="text-xs font-semibold text-amber-700 uppercase tracking-wider">
-                        Avertismente
-                      </h4>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {result.warnings.map((w, i) => (
-                        <div
-                          key={i}
-                          className="flex items-start gap-2 text-sm text-amber-700"
-                        >
-                          <span className="text-amber-400 mt-0.5">•</span>
-                          <span>{w}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-              {/* Selected material card */}
-              {selectedListing && (
-                <div className="rounded-xl border border-zinc-200 bg-white p-4">
-                  <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
-                    Material selectat
-                  </h4>
-                  <div className="flex gap-4">
-                    <div className="w-12 h-12 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0">
-                      {calcType === "CIFA" && (
-                        <IconTruck className="w-6 h-6 text-zinc-400" />
-                      )}
-                      {calcType === "POMPA" && (
-                        <IconPump className="w-6 h-6 text-zinc-400" />
-                      )}
-                      {calcType === "VRAC" && (
-                        <IconBulk className="w-6 h-6 text-zinc-400" />
-                      )}
-                      {calcType === "DEPOZIT" && (
-                        <IconWarehouse className="w-6 h-6 text-zinc-400" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-zinc-900 truncate">
-                        {selectedListing.title}
-                      </p>
-                      <p className="text-xs text-zinc-500 mt-0.5">
-                        {resolvedFlowSellerName} • {selectedListing.location}
-                      </p>
-                      <div className="flex items-center gap-3 mt-2">
-                        <span className="text-sm font-semibold text-zinc-900 font-mono">
-                          {selectedListing.price} RON/
-                          {displayUnit(selectedListing.unit)}
-                        </span>
-                        <span className="text-xs text-zinc-400">
-                          Stoc: {selectedListing.available_qty}{" "}
-                          {displayUnit(selectedListing.unit)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Assumptions */}
-              {hasValidSelection &&
-                result.assumptions &&
-                result.assumptions.length > 0 && (
-                  <div className="rounded-xl border border-sky-200 bg-sky-50 p-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <IconInfo className="w-4 h-4 text-sky-500" />
-                      <h4 className="text-xs font-semibold text-sky-700 uppercase tracking-wider">
-                        Ipoteze aplicate
-                      </h4>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      {result.assumptions.map((a, i) => (
-                        <p
-                          key={i}
-                          className="text-xs text-sky-700 leading-relaxed"
-                        >
-                          {a}
-                        </p>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              {flowFooter}
+            </>
+          ) : (
+            <div className="min-w-0 flex-1 lg:sticky lg:top-24">
+              <ResultsPane />
             </div>
-          </div>
+          )}
         </div>
       </main>
     </div>

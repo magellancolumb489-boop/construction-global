@@ -32,6 +32,18 @@ export function readConfigureDraft(): ConfigureDraftV1 | null {
     if (!raw) return null
     const parsed = JSON.parse(raw) as ConfigureDraftV1
     if (parsed?.v !== 1 || !parsed.product?.id) return null
+    // Backfill fields added after older drafts were saved in sessionStorage
+    const p = parsed.product
+    // Normalize optional seller fields for drafts saved before these existed.
+    parsed.product = {
+      ...p,
+      sellerDisplayName: p.sellerDisplayName ?? null,
+      sellerCompanyName: p.sellerCompanyName ?? null,
+      sellerEntityType: p.sellerEntityType ?? null,
+      sellerPhone: p.sellerPhone ?? null,
+      // Ciorne vechi fără join beton — array gol; server reîmprospătează la nevoie.
+      concreteClasses: p.concreteClasses ?? [],
+    }
     return parsed
   } catch {
     return null

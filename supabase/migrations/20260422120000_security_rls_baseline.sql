@@ -57,18 +57,6 @@ begin
     check (price > 0);
 end $$;
 
-do $$
-begin
-  -- auction_lots: ends_at must be after starts_at
-  alter table public.auction_lots
-    drop constraint if exists auction_lots_window_check;
-exception when others then null;
-end $$;
-
-alter table public.auction_lots
-  add constraint auction_lots_window_check
-  check (ends_at > starts_at);
-
 -- ============================================================================
 -- 2) updated_at triggers on tables that carry an updated_at column
 -- ============================================================================
@@ -88,11 +76,6 @@ create trigger touch_updated_at
   before update on public.marketplace_listings
   for each row execute function public.tg_touch_updated_at();
 
-drop trigger if exists touch_updated_at on public.auction_lots;
-create trigger touch_updated_at
-  before update on public.auction_lots
-  for each row execute function public.tg_touch_updated_at();
-
 -- ============================================================================
 -- 3) Enable RLS on every public table we own
 -- ============================================================================
@@ -101,9 +84,6 @@ alter table public.profiles                    enable row level security;
 alter table public.categories                  enable row level security;
 alter table public.marketplace_listings        enable row level security;
 alter table public.marketplace_listing_images  enable row level security;
-alter table public.auction_lots                enable row level security;
-alter table public.auction_images              enable row level security;
-alter table public.auction_bids                enable row level security;
 
 -- Force RLS even for table owner where possible (defense in depth; tolerate
 -- failures when current role is not allowed to force it on a Supabase schema).
@@ -113,9 +93,6 @@ begin
   execute 'alter table public.categories                 force row level security';
   execute 'alter table public.marketplace_listings       force row level security';
   execute 'alter table public.marketplace_listing_images force row level security';
-  execute 'alter table public.auction_lots               force row level security';
-  execute 'alter table public.auction_images             force row level security';
-  execute 'alter table public.auction_bids               force row level security';
 exception when others then
   -- not fatal: Supabase-managed owner may already force, or lack perm
   null;
@@ -189,7 +166,7 @@ create trigger profiles_block_role_update
   for each row execute function public.tg_profiles_block_role_update();
 
 -- public_profiles view: the ONLY surface that anon/auth may use to join a
--- seller name into listings/auctions. Hides phone and role.
+-- seller name into listings. Hides phone and role.
 create or replace view public.public_profiles
 with (security_invoker = true) as
 select id, display_name, avatar_path
@@ -380,204 +357,7 @@ using (
 );
 
 -- ============================================================================
--- 8) auction_lots: owner CRUD + column-level lock for bid-managed fields
--- ============================================================================
-
-drop policy if exists "auction_lots_select"         on public.auction_lots;
-drop policy if exists "auction_lots_insert"         on public.auction_lots;
-drop policy if exists "auction_lots_update_owner"   on public.auction_lots;
-drop policy if exists "auction_lots_delete_owner"   on public.auction_lots;
-
--- Lots are public reads (including ended/cancelled so winners can view).
-create policy "auction_lots_select"
-on public.auction_lots
-for select
-to anon, authenticated
-using (true);
-
-create policy "auction_lots_insert"
-on public.auction_lots
-for insert
-to authenticated
-with check (
-  auth.uid() = seller_id
-  and status in ('draft', 'scheduled')
-  and current_price = starting_price
-  and bid_count = 0
-  and current_winner_id is null
-);
-
--- Owner can update ONLY while the lot has no bids and is not yet live.
--- Once bidding is open, price/status/winner/bid_count are driven by the
--- place_bid RPC and by an admin-only close_auction path.
-create policy "auction_lots_update_owner"
-on public.auction_lots
-for update
-to authenticated
-using (
-  (auth.uid() = seller_id and status in ('draft', 'scheduled') and bid_count = 0)
-  or public.is_admin()
-)
-with check (
-  (auth.uid() = seller_id and status in ('draft', 'scheduled') and bid_count = 0)
-  or public.is_admin()
-);
-
-create policy "auction_lots_delete_owner"
-on public.auction_lots
-for delete
-to authenticated
-using (
-  (auth.uid() = seller_id and status in ('draft', 'scheduled') and bid_count = 0)
-  or public.is_admin()
-);
-
--- Column privileges: revoke direct UPDATE on the bid-managed columns so no
--- path through PostgREST can touch them, even if the policy above allowed it.
--- place_bid (SECURITY DEFINER) runs as its owner and bypasses this grant.
-revoke update (current_price, current_winner_id, bid_count, status)
-  on public.auction_lots from anon, authenticated;
-
--- Re-grant update on the remaining owner-editable columns to authenticated.
--- (We must list them; anything not listed stays non-updatable through REST.)
-grant update (
-  category_id,
-  title,
-  slug,
-  description,
-  starting_price,
-  reserve_price,
-  bid_increment,
-  currency,
-  starts_at,
-  ends_at
-) on public.auction_lots to authenticated;
-
--- seller_id lock trigger for auctions as well
-create or replace function public.tg_auction_lots_lock_seller_id()
-returns trigger
-language plpgsql
-as $$
-begin
-  if new.seller_id is distinct from old.seller_id then
-    raise exception 'seller_id is immutable' using errcode = '42501';
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists auction_lots_lock_seller_id on public.auction_lots;
-create trigger auction_lots_lock_seller_id
-  before update on public.auction_lots
-  for each row execute function public.tg_auction_lots_lock_seller_id();
-
--- ============================================================================
--- 9) auction_images: lot-owner scoped via join
--- ============================================================================
-
-drop policy if exists "auction_images_select"  on public.auction_images;
-drop policy if exists "auction_images_insert"  on public.auction_images;
-drop policy if exists "auction_images_update"  on public.auction_images;
-drop policy if exists "auction_images_delete"  on public.auction_images;
-
-create policy "auction_images_select"
-on public.auction_images
-for select
-to anon, authenticated
-using (true);
-
-create policy "auction_images_insert"
-on public.auction_images
-for insert
-to authenticated
-with check (
-  exists (
-    select 1 from public.auction_lots al
-    where al.id = lot_id
-      and al.seller_id = auth.uid()
-      and al.status in ('draft', 'scheduled')
-  )
-);
-
-create policy "auction_images_update"
-on public.auction_images
-for update
-to authenticated
-using (
-  exists (
-    select 1 from public.auction_lots al
-    where al.id = lot_id
-      and (al.seller_id = auth.uid() or public.is_admin())
-  )
-)
-with check (
-  exists (
-    select 1 from public.auction_lots al
-    where al.id = lot_id
-      and (al.seller_id = auth.uid() or public.is_admin())
-  )
-);
-
-create policy "auction_images_delete"
-on public.auction_images
-for delete
-to authenticated
-using (
-  exists (
-    select 1 from public.auction_lots al
-    where al.id = lot_id
-      and (al.seller_id = auth.uid() or public.is_admin())
-  )
-);
-
--- ============================================================================
--- 10) auction_bids: read-only for lot owner + bidder + admin; no direct writes
--- ============================================================================
-
-drop policy if exists "auction_bids_select" on public.auction_bids;
-drop policy if exists "auction_bids_insert" on public.auction_bids;
-drop policy if exists "auction_bids_update" on public.auction_bids;
-drop policy if exists "auction_bids_delete" on public.auction_bids;
-
-create policy "auction_bids_select"
-on public.auction_bids
-for select
-to authenticated
-using (
-  bidder_id = auth.uid()
-  or public.is_admin()
-  or exists (
-    select 1 from public.auction_lots al
-    where al.id = auction_bids.lot_id
-      and al.seller_id = auth.uid()
-  )
-);
-
--- Direct inserts/updates/deletes are forbidden; place_bid is the only path.
-create policy "auction_bids_insert"
-on public.auction_bids
-for insert
-to authenticated
-with check (false);
-
-create policy "auction_bids_update"
-on public.auction_bids
-for update
-to authenticated
-using (false)
-with check (false);
-
-create policy "auction_bids_delete"
-on public.auction_bids
-for delete
-to authenticated
-using (false);
-
--- Belt-and-suspenders: strip insert/update/delete privileges from anon/auth.
-revoke insert, update, delete on public.auction_bids from anon, authenticated;
-
--- ============================================================================
--- 11) Helpful indexes for RLS predicates (idempotent)
+-- 8) Helpful indexes for RLS predicates (idempotent)
 -- ============================================================================
 
 create index if not exists marketplace_listings_seller_id_idx
@@ -586,32 +366,17 @@ create index if not exists marketplace_listings_seller_id_idx
 create index if not exists marketplace_listings_is_active_idx
   on public.marketplace_listings (is_active);
 
-create index if not exists auction_lots_seller_id_idx
-  on public.auction_lots (seller_id);
-
-create index if not exists auction_lots_status_idx
-  on public.auction_lots (status);
-
-create index if not exists auction_bids_lot_id_idx
-  on public.auction_bids (lot_id);
-
-create index if not exists auction_bids_bidder_id_idx
-  on public.auction_bids (bidder_id);
-
 create index if not exists marketplace_listing_images_listing_id_idx
   on public.marketplace_listing_images (listing_id);
 
-create index if not exists auction_images_lot_id_idx
-  on public.auction_images (lot_id);
-
 -- ============================================================================
--- 12) Comments for future Stripe integration
+-- 9) Comments for future Stripe integration
 -- ============================================================================
 
 comment on function public.is_admin() is
   'RLS helper: true if the current session user has profiles.role = admin. SECURITY DEFINER so it can read profiles past its own RLS.';
 
 comment on view public.public_profiles is
-  'Anon/auth-safe projection of profiles (display_name, avatar_path). Use this for joins in listings/auctions instead of embedding profiles directly.';
+  'Anon/auth-safe projection of profiles (display_name, avatar_path). Use this for joins in listings instead of embedding profiles directly.';
 
 commit;

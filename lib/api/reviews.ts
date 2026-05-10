@@ -108,19 +108,13 @@ async function hydrateReviews(rows: Review[]): Promise<ReviewWithContext[]> {
   const listingIds = Array.from(
     new Set(rows.map((r) => r.listing_id).filter((v): v is number => v != null)),
   )
-  const auctionIds = Array.from(
-    new Set(rows.map((r) => r.auction_id).filter((v): v is number => v != null)),
-  )
 
-  const [profilesRes, listingsRes, auctionsRes] = await Promise.all([
+  const [profilesRes, listingsRes] = await Promise.all([
     profileIds.length > 0
       ? supabase.from("profiles").select("id, display_name").in("id", profileIds)
       : Promise.resolve({ data: [] as { id: string; display_name: string | null }[] }),
     listingIds.length > 0
       ? supabase.from("marketplace_listings").select("id, title").in("id", listingIds)
-      : Promise.resolve({ data: [] as { id: number; title: string }[] }),
-    auctionIds.length > 0
-      ? supabase.from("auction_lots").select("id, title").in("id", auctionIds)
       : Promise.resolve({ data: [] as { id: number; title: string }[] }),
   ])
 
@@ -128,14 +122,12 @@ async function hydrateReviews(rows: Review[]): Promise<ReviewWithContext[]> {
   for (const p of profilesRes.data ?? []) profileMap.set(p.id, p.display_name)
   const listingMap = new Map<number, string>()
   for (const l of listingsRes.data ?? []) listingMap.set(l.id, l.title)
-  const auctionMap = new Map<number, string>()
-  for (const a of auctionsRes.data ?? []) auctionMap.set(a.id, a.title)
 
   return rows.map((row) => ({
     ...row,
     reviewer_display_name: profileMap.get(row.reviewer_id) ?? null,
     target_display_name: profileMap.get(row.target_user_id) ?? null,
     listing_title: row.listing_id != null ? listingMap.get(row.listing_id) ?? null : null,
-    auction_title: row.auction_id != null ? auctionMap.get(row.auction_id) ?? null : null,
+    auction_title: null,
   }))
 }

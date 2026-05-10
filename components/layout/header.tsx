@@ -62,6 +62,12 @@ export function SiteHeader({ initialUser, isAdmin = false, wishlistCount = 0 }: 
   const [scrolled, setScrolled] = useState(false)
 
   const [authedUser, setAuthedUser] = useState<InitialUser | null>(initialUser)
+  // Radix DropdownMenu assigns unstable ids during SSR vs first client paint; render menus only after mount.
+  const [radixMenusReady, setRadixMenusReady] = useState(false)
+
+  useEffect(() => {
+    setRadixMenusReady(true)
+  }, [])
 
   useEffect(() => {
     const supabase = createClient()
@@ -136,37 +142,56 @@ export function SiteHeader({ initialUser, isAdmin = false, wishlistCount = 0 }: 
             )
           })}
 
-          {/* Publica dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
-                  isPublishActive
-                    ? "bg-primary/10 text-primary"
-                    : "bg-primary text-primary-foreground hover:bg-primary/90"
-                }`}
-              >
-                <Plus className="h-4 w-4" />
-                Publica
-                <ChevronDown className="h-3 w-3" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 rounded-xl p-1.5">
-              {publishLinks.map((pl) => (
-                <DropdownMenuItem key={pl.href} asChild className="rounded-lg p-0">
-                  <Link href={pl.href} className="flex items-center gap-3 px-3 py-2.5">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-                      <pl.icon className="h-4 w-4 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">{pl.label}</p>
-                      <p className="text-xs text-muted-foreground">{pl.sublabel}</p>
-                    </div>
-                  </Link>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Publica dropdown — mounted client-only so Radix ids match and hydration stays clean */}
+          {radixMenusReady ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+                    isPublishActive
+                      ? "bg-primary/10 text-primary"
+                      : "bg-primary text-primary-foreground hover:bg-primary/90"
+                  }`}
+                >
+                  <Plus className="h-4 w-4" />
+                  Publica
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 rounded-xl p-1.5">
+                {publishLinks.map((pl) => (
+                  <DropdownMenuItem key={pl.href} asChild className="rounded-lg p-0">
+                    <Link href={pl.href} className="flex items-center gap-3 px-3 py-2.5">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+                        <pl.icon className="h-4 w-4 text-primary" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">{pl.label}</p>
+                        <p className="text-xs text-muted-foreground">{pl.sublabel}</p>
+                      </div>
+                    </Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <button
+              type="button"
+              disabled
+              aria-hidden
+              tabIndex={-1}
+              className={`inline-flex cursor-default items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold opacity-90 ${
+                isPublishActive
+                  ? "bg-primary/10 text-primary"
+                  : "bg-primary text-primary-foreground"
+              }`}
+            >
+              <Plus className="h-4 w-4" />
+              Publica
+              <ChevronDown className="h-3 w-3" />
+            </button>
+          )}
         </nav>
 
         {/* Desktop Right */}
@@ -207,51 +232,65 @@ export function SiteHeader({ initialUser, isAdmin = false, wishlistCount = 0 }: 
           </Link>
 
           {isLoggedIn ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-1.5 rounded-xl">
+            radixMenusReady ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="gap-1.5 rounded-xl">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
+                      <User className="h-3.5 w-3.5 text-primary" />
+                    </div>
+                    <span className="max-w-[100px] truncate text-sm font-medium">
+                      {authedUser.displayName || authedUser.email}
+                    </span>
+                    <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5">
+                  <DropdownMenuItem asChild className="rounded-lg">
+                    <Link href="/account" className="gap-2">
+                      <UserCircle className="h-4 w-4" /> Contul meu
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="rounded-lg">
+                    <Link href="/account?tab=orders" className="gap-2">
+                      <ClipboardList className="h-4 w-4" /> Comenzile mele
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="rounded-lg">
+                    <Link href="/account?tab=auctions" className="gap-2">
+                      <Gavel className="h-4 w-4" /> Licitatiile mele
+                    </Link>
+                  </DropdownMenuItem>
+                  {isAdmin && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem asChild className="rounded-lg">
+                        <Link href="/admin" className="gap-2">
+                          <Settings className="h-4 w-4" /> Panou Admin
+                        </Link>
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout} className="gap-2 rounded-lg text-destructive focus:text-destructive">
+                    <LogOut className="h-4 w-4" />
+                    Deconectare
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button variant="ghost" size="sm" className="gap-1.5 rounded-xl" asChild>
+                <Link href="/account">
                   <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
                     <User className="h-3.5 w-3.5 text-primary" />
                   </div>
                   <span className="max-w-[100px] truncate text-sm font-medium">
                     {authedUser.displayName || authedUser.email}
                   </span>
-                  <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5">
-                <DropdownMenuItem asChild className="rounded-lg">
-                  <Link href="/account" className="gap-2">
-                    <UserCircle className="h-4 w-4" /> Contul meu
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild className="rounded-lg">
-                  <Link href="/account?tab=orders" className="gap-2">
-                    <ClipboardList className="h-4 w-4" /> Comenzile mele
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild className="rounded-lg">
-                  <Link href="/account?tab=auctions" className="gap-2">
-                    <Gavel className="h-4 w-4" /> Licitatiile mele
-                  </Link>
-                </DropdownMenuItem>
-                {isAdmin && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild className="rounded-lg">
-                      <Link href="/admin" className="gap-2">
-                        <Settings className="h-4 w-4" /> Panou Admin
-                      </Link>
-                    </DropdownMenuItem>
-                  </>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="gap-2 rounded-lg text-destructive focus:text-destructive">
-                  <LogOut className="h-4 w-4" />
-                  Deconectare
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden />
+                </Link>
+              </Button>
+            )
           ) : (
             <div className="flex items-center gap-1.5">
               <Button variant="ghost" size="sm" asChild className="rounded-xl text-sm">

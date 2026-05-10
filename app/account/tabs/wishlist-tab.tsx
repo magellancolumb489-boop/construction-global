@@ -6,7 +6,6 @@ import { Heart, Trash2, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/shared/empty-state"
 import { ProductCard } from "@/components/shared/product-card"
-import { AuctionCard } from "@/components/shared/auction-card"
 import { toggleWishlist, clearWishlist } from "@/lib/api/wishlist-client"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -25,13 +24,10 @@ export function WishlistTab({ wishlist }: WishlistTabProps) {
   const [busyId, setBusyId] = useState<number | null>(null)
 
   function remove(entry: WishlistEntry) {
-    if (!entry.listing && !entry.auction) return
+    if (!entry.listing) return
     setBusyId(entry.id)
     startTransition(async () => {
-      const target = entry.listing
-        ? { kind: "listing" as const, listing_id: Number(entry.listing.id) }
-        : { kind: "auction" as const, auction_id: Number(entry.auction!.id) }
-      await toggleWishlist(target)
+      await toggleWishlist({ kind: "listing", listing_id: Number(entry.listing!.id) })
       setBusyId(null)
       router.refresh()
     })
@@ -44,12 +40,14 @@ export function WishlistTab({ wishlist }: WishlistTabProps) {
     })
   }
 
-  if (wishlist.length === 0) {
+  const listingEntries = wishlist.filter((e) => e.listing != null)
+
+  if (listingEntries.length === 0) {
     return (
       <EmptyState
         icon={Heart}
         title="Nicio favorita"
-        description="Salvati produse si licitatii pentru a le gasi rapid mai tarziu."
+        description="Salvati produse din marketplace pentru a le gasi rapid mai tarziu."
         actionLabel="Catre marketplace"
         actionHref="/marketplace"
       />
@@ -61,7 +59,7 @@ export function WishlistTab({ wishlist }: WishlistTabProps) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-foreground">Favorite</h2>
-          <p className="text-xs text-muted-foreground">{wishlist.length} articole salvate.</p>
+          <p className="text-xs text-muted-foreground">{listingEntries.length} articole salvate.</p>
         </div>
         <AlertDialog>
           <AlertDialogTrigger asChild>
@@ -91,29 +89,30 @@ export function WishlistTab({ wishlist }: WishlistTabProps) {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {wishlist.map((entry) => (
-          <div key={entry.id} className="relative">
-            {entry.listing ? (
+        {listingEntries.map((entry) =>
+          entry.listing ? (
+            <div key={entry.id} className="relative">
               <ProductCard product={entry.listing} />
-            ) : entry.auction ? (
-              <AuctionCard auction={entry.auction} />
-            ) : null}
-            <Button
-              variant="outline"
-              size="sm"
-              className="absolute left-3 top-3 h-8 w-8 rounded-xl border-border/50 bg-background/80 p-0 backdrop-blur hover:bg-destructive/10 hover:text-destructive"
-              onClick={(e) => { e.preventDefault(); remove(entry) }}
-              disabled={pending && busyId === entry.id}
-              aria-label="Elimina din favorite"
-            >
-              {pending && busyId === entry.id ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Heart className="h-3.5 w-3.5 fill-destructive text-destructive" />
-              )}
-            </Button>
-          </div>
-        ))}
+              <Button
+                variant="outline"
+                size="sm"
+                className="absolute left-3 top-3 h-8 w-8 rounded-xl border-border/50 bg-background/80 p-0 backdrop-blur hover:bg-destructive/10 hover:text-destructive"
+                onClick={(e) => {
+                  e.preventDefault()
+                  remove(entry)
+                }}
+                disabled={pending && busyId === entry.id}
+                aria-label="Elimina din favorite"
+              >
+                {pending && busyId === entry.id ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Heart className="h-3.5 w-3.5 fill-destructive text-destructive" />
+                )}
+              </Button>
+            </div>
+          ) : null,
+        )}
       </div>
     </div>
   )

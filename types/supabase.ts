@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -10,171 +10,36 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.1"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
-      auction_bids: {
+      account_deletion_requests: {
         Row: {
-          amount: number
-          bidder_id: string
-          created_at: string
           id: number
-          lot_id: number
-        }
-        Insert: {
-          amount: number
-          bidder_id: string
-          created_at?: string
-          id?: never
-          lot_id: number
-        }
-        Update: {
-          amount?: number
-          bidder_id?: string
-          created_at?: string
-          id?: never
-          lot_id?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "auction_bids_bidder_id_fkey"
-            columns: ["bidder_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "auction_bids_lot_id_fkey"
-            columns: ["lot_id"]
-            isOneToOne: false
-            referencedRelation: "auction_lots"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      auction_images: {
-        Row: {
-          alt_text: string | null
-          created_at: string
-          id: number
-          is_cover: boolean
-          lot_id: number
-          sort_order: number
-          storage_path: string
-        }
-        Insert: {
-          alt_text?: string | null
-          created_at?: string
-          id?: never
-          is_cover?: boolean
-          lot_id: number
-          sort_order?: number
-          storage_path: string
-        }
-        Update: {
-          alt_text?: string | null
-          created_at?: string
-          id?: never
-          is_cover?: boolean
-          lot_id?: number
-          sort_order?: number
-          storage_path?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "auction_images_lot_id_fkey"
-            columns: ["lot_id"]
-            isOneToOne: false
-            referencedRelation: "auction_lots"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      auction_lots: {
-        Row: {
-          bid_count: number
-          bid_increment: number
-          category_id: number | null
-          created_at: string
-          currency: string
-          current_price: number
-          current_winner_id: string | null
-          description: string | null
-          ends_at: string
-          id: number
-          reserve_price: number | null
-          seller_id: string
-          slug: string
-          starting_price: number
-          starts_at: string
+          reason: string | null
+          requested_at: string
+          scheduled_for: string
           status: string
-          title: string
-          updated_at: string
+          user_id: string
         }
         Insert: {
-          bid_count?: number
-          bid_increment?: number
-          category_id?: number | null
-          created_at?: string
-          currency?: string
-          current_price: number
-          current_winner_id?: string | null
-          description?: string | null
-          ends_at: string
-          id?: never
-          reserve_price?: number | null
-          seller_id: string
-          slug: string
-          starting_price: number
-          starts_at: string
+          id?: number
+          reason?: string | null
+          requested_at?: string
+          scheduled_for: string
           status?: string
-          title: string
-          updated_at?: string
+          user_id: string
         }
         Update: {
-          bid_count?: number
-          bid_increment?: number
-          category_id?: number | null
-          created_at?: string
-          currency?: string
-          current_price?: number
-          current_winner_id?: string | null
-          description?: string | null
-          ends_at?: string
-          id?: never
-          reserve_price?: number | null
-          seller_id?: string
-          slug?: string
-          starting_price?: number
-          starts_at?: string
+          id?: number
+          reason?: string | null
+          requested_at?: string
+          scheduled_for?: string
           status?: string
-          title?: string
-          updated_at?: string
+          user_id?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "auction_lots_category_id_fkey"
-            columns: ["category_id"]
-            isOneToOne: false
-            referencedRelation: "categories"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "auction_lots_current_winner_id_fkey"
-            columns: ["current_winner_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "auction_lots_seller_id_fkey"
-            columns: ["seller_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       categories: {
         Row: {
@@ -213,6 +78,68 @@ export type Database = {
             columns: ["parent_id"]
             isOneToOne: false
             referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      login_events: {
+        Row: {
+          created_at: string
+          event: string
+          id: number
+          ip: unknown
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event: string
+          id?: number
+          ip?: unknown
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event?: string
+          id?: number
+          ip?: unknown
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      marketplace_listing_concrete_classes: {
+        Row: {
+          class_code: string
+          consistencies: string[]
+          consistency_prices: Json
+          created_at: string
+          id: number
+          listing_id: number
+        }
+        Insert: {
+          class_code: string
+          consistencies: string[]
+          consistency_prices: Json
+          created_at?: string
+          id?: never
+          listing_id: number
+        }
+        Update: {
+          class_code?: string
+          consistencies?: string[]
+          consistency_prices?: Json
+          created_at?: string
+          id?: never
+          listing_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_listing_concrete_classes_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_listings"
             referencedColumns: ["id"]
           },
         ]
@@ -268,6 +195,7 @@ export type Database = {
           pickup_lat: number | null
           pickup_lng: number | null
           price: number
+          seller_assumes_transport: boolean
           seller_id: string
           service_area: string | null
           slug: string
@@ -295,6 +223,7 @@ export type Database = {
           pickup_lat?: number | null
           pickup_lng?: number | null
           price: number
+          seller_assumes_transport?: boolean
           seller_id: string
           service_area?: string | null
           slug: string
@@ -322,6 +251,7 @@ export type Database = {
           pickup_lat?: number | null
           pickup_lng?: number | null
           price?: number
+          seller_assumes_transport?: boolean
           seller_id?: string
           service_area?: string | null
           slug?: string
@@ -344,6 +274,84 @@ export type Database = {
             columns: ["seller_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_listings_seller_id_fkey"
+            columns: ["seller_id"]
+            isOneToOne: false
+            referencedRelation: "public_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      message_threads: {
+        Row: {
+          buyer_id: string
+          context_id: number | null
+          context_type: string | null
+          created_at: string
+          id: number
+          last_message_at: string
+          seller_id: string
+          subject: string | null
+        }
+        Insert: {
+          buyer_id: string
+          context_id?: number | null
+          context_type?: string | null
+          created_at?: string
+          id?: number
+          last_message_at?: string
+          seller_id: string
+          subject?: string | null
+        }
+        Update: {
+          buyer_id?: string
+          context_id?: number | null
+          context_type?: string | null
+          created_at?: string
+          id?: number
+          last_message_at?: string
+          seller_id?: string
+          subject?: string | null
+        }
+        Relationships: []
+      }
+      messages: {
+        Row: {
+          attachments: Json
+          body: string
+          created_at: string
+          id: number
+          read_at: string | null
+          sender_id: string
+          thread_id: number
+        }
+        Insert: {
+          attachments?: Json
+          body: string
+          created_at?: string
+          id?: number
+          read_at?: string | null
+          sender_id: string
+          thread_id: number
+        }
+        Update: {
+          attachments?: Json
+          body?: string
+          created_at?: string
+          id?: number
+          read_at?: string | null
+          sender_id?: string
+          thread_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "message_threads"
             referencedColumns: ["id"]
           },
         ]
@@ -414,6 +422,53 @@ export type Database = {
         }
         Relationships: []
       }
+      reviews: {
+        Row: {
+          body: string | null
+          created_at: string
+          id: number
+          listing_id: number | null
+          order_id: number | null
+          rating: number
+          reviewer_id: string
+          target_user_id: string
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          id?: number
+          listing_id?: number | null
+          order_id?: number | null
+          rating: number
+          reviewer_id: string
+          target_user_id: string
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          id?: number
+          listing_id?: number | null
+          order_id?: number | null
+          rating?: number
+          reviewer_id?: string
+          target_user_id?: string
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reviews_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_addresses: {
         Row: {
           city: string
@@ -440,7 +495,7 @@ export type Database = {
           country?: string
           county?: string | null
           created_at?: string
-          id?: never
+          id?: number
           is_default_billing?: boolean
           is_default_shipping?: boolean
           label?: string | null
@@ -460,7 +515,7 @@ export type Database = {
           country?: string
           county?: string | null
           created_at?: string
-          id?: never
+          id?: number
           is_default_billing?: boolean
           is_default_shipping?: boolean
           label?: string | null
@@ -504,23 +559,20 @@ export type Database = {
       wishlist_items: {
         Row: {
           added_at: string
-          auction_id: number | null
           id: number
-          listing_id: number | null
+          listing_id: number
           user_id: string
         }
         Insert: {
           added_at?: string
-          auction_id?: number | null
-          id?: never
-          listing_id?: number | null
+          id?: number
+          listing_id: number
           user_id: string
         }
         Update: {
           added_at?: string
-          auction_id?: number | null
-          id?: never
-          listing_id?: number | null
+          id?: number
+          listing_id?: number
           user_id?: string
         }
         Relationships: [
@@ -531,191 +583,75 @@ export type Database = {
             referencedRelation: "marketplace_listings"
             referencedColumns: ["id"]
           },
-          {
-            foreignKeyName: "wishlist_items_auction_id_fkey"
-            columns: ["auction_id"]
-            isOneToOne: false
-            referencedRelation: "auction_lots"
-            referencedColumns: ["id"]
-          },
         ]
-      }
-      reviews: {
-        Row: {
-          auction_id: number | null
-          body: string | null
-          created_at: string
-          id: number
-          listing_id: number | null
-          order_id: number | null
-          rating: number
-          reviewer_id: string
-          target_user_id: string
-          title: string | null
-          updated_at: string
-        }
-        Insert: {
-          auction_id?: number | null
-          body?: string | null
-          created_at?: string
-          id?: never
-          listing_id?: number | null
-          order_id?: number | null
-          rating: number
-          reviewer_id: string
-          target_user_id: string
-          title?: string | null
-          updated_at?: string
-        }
-        Update: {
-          auction_id?: number | null
-          body?: string | null
-          created_at?: string
-          id?: never
-          listing_id?: number | null
-          order_id?: number | null
-          rating?: number
-          reviewer_id?: string
-          target_user_id?: string
-          title?: string | null
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      message_threads: {
-        Row: {
-          buyer_id: string
-          context_id: number | null
-          context_type: string | null
-          created_at: string
-          id: number
-          last_message_at: string
-          seller_id: string
-          subject: string | null
-        }
-        Insert: {
-          buyer_id: string
-          context_id?: number | null
-          context_type?: string | null
-          created_at?: string
-          id?: never
-          last_message_at?: string
-          seller_id: string
-          subject?: string | null
-        }
-        Update: {
-          buyer_id?: string
-          context_id?: number | null
-          context_type?: string | null
-          created_at?: string
-          id?: never
-          last_message_at?: string
-          seller_id?: string
-          subject?: string | null
-        }
-        Relationships: []
-      }
-      messages: {
-        Row: {
-          attachments: Json
-          body: string
-          created_at: string
-          id: number
-          read_at: string | null
-          sender_id: string
-          thread_id: number
-        }
-        Insert: {
-          attachments?: Json
-          body: string
-          created_at?: string
-          id?: never
-          read_at?: string | null
-          sender_id: string
-          thread_id: number
-        }
-        Update: {
-          attachments?: Json
-          body?: string
-          created_at?: string
-          id?: never
-          read_at?: string | null
-          sender_id?: string
-          thread_id?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "messages_thread_id_fkey"
-            columns: ["thread_id"]
-            isOneToOne: false
-            referencedRelation: "message_threads"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      login_events: {
-        Row: {
-          created_at: string
-          event: string
-          id: number
-          ip: string | null
-          user_agent: string | null
-          user_id: string
-        }
-        Insert: {
-          created_at?: string
-          event: string
-          id?: never
-          ip?: string | null
-          user_agent?: string | null
-          user_id: string
-        }
-        Update: {
-          created_at?: string
-          event?: string
-          id?: never
-          ip?: string | null
-          user_agent?: string | null
-          user_id?: string
-        }
-        Relationships: []
-      }
-      account_deletion_requests: {
-        Row: {
-          id: number
-          reason: string | null
-          requested_at: string
-          scheduled_for: string
-          status: string
-          user_id: string
-        }
-        Insert: {
-          id?: never
-          reason?: string | null
-          requested_at?: string
-          scheduled_for: string
-          status?: string
-          user_id: string
-        }
-        Update: {
-          id?: never
-          reason?: string | null
-          requested_at?: string
-          scheduled_for?: string
-          status?: string
-          user_id?: string
-        }
-        Relationships: []
       }
     }
     Views: {
-      [_ in never]: never
+      public_profiles: {
+        Row: {
+          avatar_path: string | null
+          company_name: string | null
+          display_name: string | null
+          entity_type: string | null
+          id: string | null
+        }
+        Insert: {
+          avatar_path?: string | null
+          company_name?: string | null
+          display_name?: string | null
+          entity_type?: string | null
+          id?: string | null
+        }
+        Update: {
+          avatar_path?: string | null
+          company_name?: string | null
+          display_name?: string | null
+          entity_type?: string | null
+          id?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      place_bid: { Args: { p_amount: number; p_lot_id: number }; Returns: Json }
-      close_auction: { Args: { p_lot_id: number }; Returns: Json }
-      set_user_role: { Args: { p_target: string; p_role: string }; Returns: Json }
-      is_admin: { Args: Record<string, never>; Returns: boolean }
+      get_my_profile: {
+        Args: never
+        Returns: {
+          avatar_path: string | null
+          bio: string | null
+          company_name: string | null
+          created_at: string
+          display_name: string | null
+          entity_type: string | null
+          fiscal_address: Json | null
+          id: string
+          phone: string | null
+          preferences: Json
+          reg_com: string | null
+          role: string
+          seller_activated_at: string | null
+          seller_policies: Json
+          supplier_settings: Json
+          tax_id: string | null
+          updated_at: string
+          vat_id: string | null
+          website_url: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      is_admin: { Args: never; Returns: boolean }
+      set_user_role: {
+        Args: { p_role: string; p_target: string }
+        Returns: Json
+      }
+      upsert_listing_concrete_classes: {
+        Args: { p_listing_id: number; p_rows: Json }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never

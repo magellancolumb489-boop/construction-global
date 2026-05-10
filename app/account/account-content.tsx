@@ -54,8 +54,8 @@ interface GroupDef {
 
 const GROUPS: GroupDef[] = [
   { id: "cont", label: "Cont" },
-  { id: "cumparator", label: "Cumparator" },
-  { id: "vanzator", label: "Vanzator" },
+  { id: "cumparator", label: "Cumpărător" },
+  { id: "vanzator", label: "Vânzător" },
   { id: "comunicare", label: "Comunicare" },
 ]
 
@@ -152,7 +152,7 @@ export default function AccountContent(props: AccountContentProps) {
           <p className="truncate text-sm text-muted-foreground">{props.userEmail}</p>
           {props.profile?.seller_activated_at && (
             <Badge className="mt-1 rounded-lg bg-emerald-500/10 text-[10px] text-emerald-600 hover:bg-emerald-500/10">
-              Cont vanzator activ
+              Cont vânzător activ
             </Badge>
           )}
         </div>

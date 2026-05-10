@@ -3,18 +3,15 @@ import { z } from "zod"
 const targetRefinement = z
   .object({
     listing_id: z.number().int().positive().nullable().optional(),
-    auction_id: z.number().int().positive().nullable().optional(),
     order_id: z.number().int().positive().nullable().optional(),
   })
   .superRefine((val, ctx) => {
-    const count = [val.listing_id, val.auction_id, val.order_id].filter(
-      (v) => v != null,
-    ).length
+    const count = [val.listing_id, val.order_id].filter((v) => v != null).length
     if (count === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["listing_id"],
-        message: "Specificati anuntul, licitatia sau comanda.",
+        message: "Specificati anuntul sau comanda.",
       })
     }
     if (count > 1) {

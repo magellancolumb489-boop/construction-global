@@ -54,29 +54,3 @@ export async function changeUserRoleAction(
   revalidatePath("/admin/users")
   return { success: true }
 }
-
-// Admin-only: close an auction early via SECURITY DEFINER RPC.
-export async function closeAuctionAction(
-  lotId: number
-): Promise<ActionResult> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return { success: false, error: "Not authenticated" }
-
-  const { data, error } = await supabase.rpc("close_auction", { p_lot_id: lotId })
-
-  if (error) return { success: false, error: error.message }
-
-  if (data && typeof data === "object" && "ok" in data) {
-    const payload = data as { ok: boolean; error?: string }
-    if (!payload.ok) {
-      return { success: false, error: payload.error ?? "forbidden" }
-    }
-  }
-
-  revalidatePath("/admin/auctions")
-  return { success: true }
-}

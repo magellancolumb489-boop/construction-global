@@ -73,9 +73,9 @@ export function SellerPoliciesTab({ profile }: SellerPoliciesTabProps) {
             <FileText className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-foreground">Politici vanzator</h2>
+            <h2 className="text-lg font-bold text-foreground">Politici vânzător</h2>
             <p className="text-xs text-muted-foreground">
-              Cumparatorii vad aceste texte pe fiecare anunt si pe factura.
+              Cumpărătorii văd aceste texte pe fiecare anunț și pe factură.
             </p>
           </div>
         </div>

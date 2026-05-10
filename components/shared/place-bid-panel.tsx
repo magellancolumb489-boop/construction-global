@@ -1,8 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { Gavel, LogIn, CheckCircle2, Loader2, Zap, ShieldCheck } from "lucide-react"
+import { Gavel, LogIn, CheckCircle2, Zap, ShieldCheck } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,11 +11,11 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { placeAuctionBid } from "@/lib/api/auctions-client"
 import { formatMoney, MoneyDisplay } from "@/components/shared/money-display"
 import type { AuctionDetail } from "@/types/domain"
 import Link from "next/link"
 
+// Shell only: no Supabase `place_bid` RPC while auctions are stand-down.
 export function PlaceBidPanel({
   auction,
   isLoggedIn = true,
@@ -26,55 +25,15 @@ export function PlaceBidPanel({
   isLoggedIn?: boolean
   isHighestBidder?: boolean
 }) {
-  const router = useRouter()
   const [bidAmount, setBidAmount] = useState(String(auction.minNextBid))
-  const [loading, setLoading] = useState(false)
-  const [buyNowLoading, setBuyNowLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
 
   const isActive = auction.status === "active"
   const hasBuyNow = !!(auction.reservePrice && auction.reservePrice > 0)
   const canBuyNow = hasBuyNow && isActive && auction.currentHighestBid < auction.reservePrice!
 
-  async function handleBid() {
-    setError(null)
-    setSuccess(false)
-    setLoading(true)
-    try {
-      const result = await placeAuctionBid(Number(auction.id), Number(bidAmount))
-      if (result.success) {
-        setSuccess(true)
-        router.refresh()
-      } else {
-        setError(result.error ?? "Eroare necunoscuta.")
-      }
-    } catch {
-      setError("A aparut o eroare. Incercati din nou.")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Buy Now = place a bid at the reserve price, which should end the auction
-  async function handleBuyNow() {
-    if (!auction.reservePrice) return
-    setError(null)
-    setSuccess(false)
-    setBuyNowLoading(true)
-    try {
-      const result = await placeAuctionBid(Number(auction.id), auction.reservePrice)
-      if (result.success) {
-        setSuccess(true)
-        router.refresh()
-      } else {
-        setError(result.error ?? "Eroare necunoscuta.")
-      }
-    } catch {
-      setError("A aparut o eroare. Incercati din nou.")
-    } finally {
-      setBuyNowLoading(false)
-    }
+  function blockBidAction() {
+    setError("Ofertele nu pot fi plasate — licitatiile sunt in relansare (fara persistenta DB).")
   }
 
   if (!isLoggedIn) {
@@ -98,7 +57,6 @@ export function PlaceBidPanel({
 
   return (
     <div className="space-y-3">
-      {/* Bid Panel */}
       <Card className="border-2 border-primary/10 shadow-md">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-lg">
@@ -107,7 +65,11 @@ export function PlaceBidPanel({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {isHighestBidder && !success && (
+          <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
+            UI demonstrativa — nu se trimit oferte catre server.
+          </p>
+
+          {isHighestBidder && (
             <div className="flex items-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
               Sunteti cel mai mare ofertant!
@@ -132,6 +94,8 @@ export function PlaceBidPanel({
                   value={bidAmount}
                   onChange={(e) => setBidAmount(e.target.value)}
                   className="mt-1.5 h-12 text-lg font-semibold"
+                  readOnly
+                  aria-readonly
                 />
               </div>
 
@@ -141,27 +105,19 @@ export function PlaceBidPanel({
                 </div>
               )}
 
-              {success && (
-                <div className="flex items-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
-                  <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  Oferta plasata cu succes!
-                </div>
-              )}
-
               <Button
+                type="button"
                 className="h-12 w-full rounded-xl bg-primary text-base font-semibold text-primary-foreground shadow-md hover:bg-primary/90 active:scale-[0.98] transition-all"
-                onClick={handleBid}
-                disabled={loading || buyNowLoading}
+                onClick={blockBidAction}
               >
-                {loading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Gavel className="mr-2 h-5 w-5" />}
-                {loading ? "Se proceseaza..." : "Plaseaza oferta"}
+                <Gavel className="mr-2 h-5 w-5" />
+                Plaseaza oferta (indisponibil)
               </Button>
             </>
           )}
         </CardContent>
       </Card>
 
-      {/* Buy Now Panel -- only when reserve price exists and hasn't been met */}
       {canBuyNow && (
         <Card className="overflow-hidden border-2 border-amber-400/40 bg-linear-to-br from-amber-50/80 to-orange-50/50 shadow-md dark:from-amber-950/20 dark:to-orange-950/10">
           <CardContent className="p-5">
@@ -192,15 +148,11 @@ export function PlaceBidPanel({
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button
+                  type="button"
                   className="h-12 w-full rounded-xl bg-linear-to-r from-amber-500 to-orange-500 text-base font-bold text-white shadow-lg hover:from-amber-600 hover:to-orange-600 active:scale-[0.98] transition-all"
-                  disabled={loading || buyNowLoading}
                 >
-                  {buyNowLoading ? (
-                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  ) : (
-                    <Zap className="mr-2 h-5 w-5" />
-                  )}
-                  {buyNowLoading ? "Se proceseaza..." : `Cumpara acum — ${formatMoney(auction.reservePrice!, auction.currency)}`}
+                  <Zap className="mr-2 h-5 w-5" />
+                  Cumpara acum — {formatMoney(auction.reservePrice!, auction.currency)}
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
@@ -214,7 +166,8 @@ export function PlaceBidPanel({
                 <AlertDialogFooter>
                   <AlertDialogCancel>Anuleaza</AlertDialogCancel>
                   <AlertDialogAction
-                    onClick={handleBuyNow}
+                    type="button"
+                    onClick={blockBidAction}
                     className="bg-linear-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600"
                   >
                     <Zap className="mr-2 h-4 w-4" />

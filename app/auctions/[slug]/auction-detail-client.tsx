@@ -1,20 +1,14 @@
 "use client"
 
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { Tag, User as UserIcon, Calendar, Edit, Trash2, Loader2, Clock, TrendingUp, Hash, Gavel } from "lucide-react"
+import { Tag, User as UserIcon, Calendar, Edit, Clock, TrendingUp, Hash, Gavel } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { GalleryCarousel } from "@/components/shared/gallery-carousel"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { MoneyDisplay, formatMoney } from "@/components/shared/money-display"
@@ -22,8 +16,6 @@ import { CountdownTimer } from "@/components/shared/countdown-timer"
 import { PlaceBidPanel } from "@/components/shared/place-bid-panel"
 import { WinnerPaymentBlock } from "@/components/shared/winner-payment-block"
 import { AuctionCard } from "@/components/shared/auction-card"
-import { useAuctionPoll } from "@/hooks/use-auction-poll"
-import { deleteAuction } from "@/lib/api/auctions-client"
 import { formatDistanceToNow } from "date-fns"
 import { ro } from "date-fns/locale"
 import type { AuctionDetail, AuctionListItem, BidRow } from "@/types/domain"
@@ -47,25 +39,11 @@ export function AuctionDetailClient({
   lotId,
   relatedAuctions = [],
 }: AuctionDetailClientProps) {
-  const { auction, bids } = useAuctionPoll(initialAuction, initialBids)
-  const router = useRouter()
-  const [deleting, setDeleting] = useState(false)
-
-  if (!auction) return null
+  const [auction] = useState(initialAuction)
+  const [bids] = useState(initialBids)
 
   const isHighestBidder = !!(currentUserId && auction.winnerId === currentUserId)
   const isActive = auction.status === "active"
-
-  async function handleDelete() {
-    setDeleting(true)
-    const res = await deleteAuction(lotId)
-    if (res.success) {
-      router.push("/account?tab=auctions")
-      router.refresh()
-    } else {
-      setDeleting(false)
-    }
-  }
 
   return (
     <div className="space-y-6">
@@ -86,24 +64,6 @@ export function AuctionDetailClient({
                 </Link>
               </Button>
             )}
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive" size="sm" className="rounded-xl" disabled={deleting}>
-                  {deleting ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1 h-4 w-4" />}
-                  Sterge
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent className="rounded-2xl">
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Sterge licitatia?</AlertDialogTitle>
-                  <AlertDialogDescription>Aceasta actiune este ireversibila.</AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel className="rounded-xl">Anuleaza</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDelete} className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90">Sterge Definitiv</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
           </div>
         </div>
       )}

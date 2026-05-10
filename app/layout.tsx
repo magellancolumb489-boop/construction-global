@@ -35,11 +35,9 @@ export default async function RootLayout({
         displayName: user.user_metadata?.display_name ?? "",
       }
       // Role lookup is a tiny query; a miss keeps isAdmin false and hides the admin link in the header
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .maybeSingle()
+      // Role is not in anon-safe column grants; same RPC as account profile load.
+      const { data: profileRows } = await supabase.rpc("get_my_profile")
+      const profile = Array.isArray(profileRows) ? profileRows[0] : null
       isAdmin = profile?.role === "admin"
       // Wishlist badge count for the header. Cheap head:true query.
       try {

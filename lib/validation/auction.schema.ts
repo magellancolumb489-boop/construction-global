@@ -5,7 +5,7 @@ export const auctionCurrencySchema = z.enum(["RON", "EUR", "ron", "eur"])
 
 // Status the seller is allowed to choose on create / save. 'active', 'ended',
 // 'cancelled' are NEVER accepted from the client -- they are controlled by
-// place_bid / close_auction / time-based transitions.
+// Time-based transitions when auctions return (DB stand-down).
 export const auctionSellerStatusSchema = z.enum(["draft", "scheduled"])
 
 // Fields the seller may set on create. current_price, current_winner_id,
@@ -64,11 +64,3 @@ export const auctionUpdateSchema = z
 
 export type AuctionCreateInput = z.infer<typeof auctionCreateSchema>
 export type AuctionUpdateInput = z.infer<typeof auctionUpdateSchema>
-
-// Bid input used by placeAuctionBid client -> validated before RPC call
-export const bidInputSchema = z.object({
-  lot_id: z.number().int().positive(),
-  amount: z.number().positive("Suma trebuie sa fie pozitiva"),
-})
-
-export type BidInput = z.infer<typeof bidInputSchema>

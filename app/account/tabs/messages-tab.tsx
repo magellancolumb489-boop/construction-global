@@ -90,7 +90,7 @@ export function MessagesTab({ threads: initialThreads, currentUserId }: Messages
       <EmptyState
         icon={MessageSquare}
         title="Inbox gol"
-        description="Cand porniti o conversatie cu un vanzator sau cumparator, aceasta va apare aici."
+        description="Când porniți o conversație cu un vânzător sau cumpărător, aceasta va apărea aici."
       />
     )
   }

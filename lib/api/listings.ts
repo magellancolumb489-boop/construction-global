@@ -1,5 +1,9 @@
 import { createClient } from "@/lib/supabase/server"
 import type { Tables } from "@/types/supabase"
+import {
+  concreteSelectionsFromRows,
+  type ListingConcreteClassRow,
+} from "@/lib/listing-wizard-form-state"
 import type {
   ProductListItem,
   ProductDetail,
@@ -13,6 +17,8 @@ export type ListingImage = Tables<"marketplace_listing_images">
 
 export interface ListingWithImages extends Listing {
   marketplace_listing_images: ListingImage[]
+  /** Present when migration `20260510120000_concrete_classes` is applied. */
+  marketplace_listing_concrete_classes?: ListingConcreteClassRow[]
 }
 
 export interface ListingsFilter {
@@ -68,13 +74,25 @@ export function toProductListItem(
 export function toProductDetail(
   listing: ListingWithImages,
   categoryName?: string,
-  seller?: { display_name: string | null; phone: string | null } | null
+  seller?: {
+    display_name: string | null
+    phone: string | null
+    company_name: string | null
+    entity_type: string | null
+  } | null
 ): ProductDetail {
   const images = listing.marketplace_listing_images
     .sort((a, b) => a.display_order - b.display_order)
     .map((img) => storagePublicUrl(img.storage_path))
 
   const kind = listingKindFromRow(listing)
+  // Rânduri beton: doar pentru listing_type concrete; altfel array gol.
+  const concreteClasses =
+    kind === "concrete"
+      ? concreteSelectionsFromRows(
+          listing.marketplace_listing_concrete_classes ?? null,
+        )
+      : []
   return {
     ...toProductListItem(listing, categoryName, listing.marketplace_listing_images[0]?.storage_path),
     listingKind: kind,
@@ -84,6 +102,8 @@ export function toProductDetail(
     categoryId: listing.category_id ?? null,
     location: listing.location ?? null,
     sellerDisplayName: seller?.display_name?.trim() || null,
+    sellerCompanyName: seller?.company_name?.trim() || null,
+    sellerEntityType: seller?.entity_type?.trim() || null,
     sellerPhone: seller?.phone?.trim() || null,
     transportFee: listing.transport_fee ?? null,
     minOrderQty: listing.min_order_qty ?? null,
@@ -91,6 +111,7 @@ export function toProductDetail(
     pickupLng: listing.pickup_lng ?? null,
     transportModes: listing.transport_modes ?? null,
     serviceArea: listing.service_area ?? null,
+    concreteClasses,
   }
 }
 
@@ -266,7 +287,7 @@ export async function getListingForEdit(id: number): Promise<ListingWithImages |
 
   const { data, error } = await supabase
     .from("marketplace_listings")
-    .select("*, marketplace_listing_images(*)")
+    .select("*, marketplace_listing_images(*), marketplace_listing_concrete_classes(*)")
     .eq("id", id)
     .eq("seller_id", user.id)
     .single()
@@ -296,10 +317,13 @@ export async function getListingOwnerInfo(slug: string): Promise<{ sellerId: str
 export async function getProductDetailFromListing(slug: string): Promise<ProductDetail | null> {
   const supabase = await createClient()
 
-  const { data, error } = await supabase
+  // Embed `public_profiles` (not `profiles`) so other sellers stay visible under RLS.
+  // Cast until `public_profiles` is modeled on `marketplace_listings` in generated types.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
     .from("marketplace_listings")
     .select(
-      "*, marketplace_listing_images(*), categories(name), profiles(display_name, phone)"
+      "*, marketplace_listing_images(*), marketplace_listing_concrete_classes(*), categories(name), public_profiles(display_name, company_name, entity_type)",
     )
     .eq("slug", slug)
     .eq("is_active", true)
@@ -313,25 +337,57 @@ export async function getProductDetailFromListing(slug: string): Promise<Product
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const row = data as any
   const catName = row.categories?.name ?? ""
-  const prof = row.profiles as
-    | { display_name: string | null; phone: string | null }
-    | { display_name: string | null; phone: string | null }[]
-    | null
-  let seller = Array.isArray(prof) ? prof[0] ?? null : prof
-  // Embed can be null (RLS) or return blank display_name; direct read often still works for public marketplace
   const sellerId = row.seller_id as string
-  if (!seller?.display_name?.trim()) {
-    const { data: profRow, error: profErr } = await supabase
-      .from("profiles")
-      .select("display_name, phone")
-      .eq("id", sellerId)
-      .maybeSingle()
-    if (!profErr && profRow) {
-      seller = {
-        display_name: profRow.display_name,
-        phone: profRow.phone,
-      }
+
+  type PublicProfileSellerFields = {
+    display_name: string | null
+    company_name: string | null
+    entity_type: string | null
+  }
+
+  const rawEmbed = row.public_profiles as
+    | PublicProfileSellerFields
+    | PublicProfileSellerFields[]
+    | null
+    | undefined
+  const sellerEmbedRow = Array.isArray(rawEmbed)
+    ? rawEmbed[0] ?? null
+    : rawEmbed ?? null
+
+  const { data: pubRow, error: pubErr } = await supabase
+    .from("public_profiles")
+    .select("display_name, company_name, entity_type")
+    .eq("id", sellerId)
+    .maybeSingle()
+
+  const pick = (
+    embed: string | null | undefined,
+    direct: string | null | undefined,
+  ) => {
+    const trimmedEmbed = embed?.trim()
+    if (trimmedEmbed) return trimmedEmbed
+    const trimmedDirect = direct?.trim()
+    return trimmedDirect || null
+  }
+
+  type SellerRow = {
+    display_name: string | null
+    phone: string | null
+    company_name: string | null
+    entity_type: string | null
+  }
+
+  const dir = (!pubErr && pubRow ? pubRow : null) as PublicProfileSellerFields | null
+
+  let seller: SellerRow | null = null
+  if (dir || sellerEmbedRow) {
+    seller = {
+      display_name: pick(sellerEmbedRow?.display_name, dir?.display_name),
+      phone: null,
+      company_name: pick(sellerEmbedRow?.company_name, dir?.company_name),
+      entity_type: pick(sellerEmbedRow?.entity_type, dir?.entity_type),
     }
   }
+
   return toProductDetail(row as ListingWithImages, catName, seller)
 }

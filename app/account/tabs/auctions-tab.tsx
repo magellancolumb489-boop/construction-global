@@ -1,21 +1,13 @@
 "use client"
 
-import { useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { Gavel, Plus, Eye, Edit, Trash2, Loader2, Tag, TrendingUp } from "lucide-react"
+import { Gavel, Plus, Eye, Edit, Tag, TrendingUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { MoneyDisplay } from "@/components/shared/money-display"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { EmptyState } from "@/components/shared/empty-state"
 import { SellerActivationBanner } from "@/components/shared/seller-activation-banner"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
-import { deleteAuction } from "@/lib/api/auctions-client"
 import type { MyAuction } from "./types"
 import type { Profile } from "@/lib/api/profile-client"
 
@@ -25,8 +17,6 @@ interface AuctionsTabProps {
 }
 
 export function AuctionsTab({ profile, auctions }: AuctionsTabProps) {
-  const router = useRouter()
-  const [deletingId, setDeletingId] = useState<number | null>(null)
   const isActive = Boolean(profile?.seller_activated_at)
   const hasBusiness = Boolean(profile?.company_name && profile?.tax_id)
 
@@ -37,7 +27,9 @@ export function AuctionsTab({ profile, auctions }: AuctionsTabProps) {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-foreground">Licitatiile mele</h2>
         <Button asChild className="rounded-xl bg-primary text-primary-foreground shadow-sm">
-          <Link href="/sell/auction/new"><Plus className="mr-1 h-4 w-4" /> Licitatie noua</Link>
+          <Link href="/sell/auction/new">
+            <Plus className="mr-1 h-4 w-4" /> Licitatie noua
+          </Link>
         </Button>
       </div>
 
@@ -45,8 +37,8 @@ export function AuctionsTab({ profile, auctions }: AuctionsTabProps) {
         <EmptyState
           icon={Gavel}
           title="Nicio licitatie"
-          description="Nu aveti licitatii create inca."
-          actionLabel="Creeaza prima licitatie"
+          description="Nu aveti licitatii persistente — functionalitatea este in relansare."
+          actionLabel="Formular demonstrativ"
           actionHref="/sell/auction/new"
         />
       ) : (
@@ -87,42 +79,6 @@ export function AuctionsTab({ profile, auctions }: AuctionsTabProps) {
                     </Link>
                   </Button>
                 )}
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl border-destructive/20 text-destructive hover:bg-destructive/5"
-                      disabled={deletingId === a.id}
-                    >
-                      {deletingId === a.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent className="rounded-2xl">
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Sterge &ldquo;{a.title}&rdquo;?</AlertDialogTitle>
-                      <AlertDialogDescription>Aceasta actiune este ireversibila.</AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel className="rounded-xl">Anuleaza</AlertDialogCancel>
-                      <AlertDialogAction
-                        className="rounded-xl bg-destructive text-destructive-foreground"
-                        onClick={async () => {
-                          setDeletingId(a.id)
-                          await deleteAuction(a.id)
-                          setDeletingId(null)
-                          router.refresh()
-                        }}
-                      >
-                        Sterge
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
               </div>
             </div>
           ))}

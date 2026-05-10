@@ -4,7 +4,9 @@ import {
   createListingAction,
   updateListingAction,
   deleteListingAction,
+  upsertConcreteClassesAction,
 } from "@/app/sell/listing/actions"
+import type { ConcreteClassesRpcPayload } from "@/lib/validation/listing.schema"
 
 export type Listing = Tables<"marketplace_listings">
 export type ListingInsert = Omit<TablesInsert<"marketplace_listings">, "id" | "created_at" | "updated_at">
@@ -38,6 +40,15 @@ export async function deleteListing(
   id: number
 ): Promise<{ success: boolean; error?: string }> {
   const res = await deleteListingAction(id)
+  return res.success ? { success: true } : { success: false, error: res.error }
+}
+
+/** Persist per-class concrete rows after the parent listing row exists. */
+export async function upsertConcreteClasses(
+  listingId: number,
+  rows: ConcreteClassesRpcPayload,
+): Promise<{ success: boolean; error?: string }> {
+  const res = await upsertConcreteClassesAction(listingId, rows)
   return res.success ? { success: true } : { success: false, error: res.error }
 }
 

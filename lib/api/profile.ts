@@ -9,15 +9,15 @@ export async function getProfile(): Promise<Profile | null> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .single()
+  // Column-level grants hide phone/role from direct SELECT *; use SECURITY DEFINER RPC instead.
+  const { data, error } = await supabase.rpc("get_my_profile")
 
   if (error) {
     console.error("getProfile error:", error.message)
     return null
   }
-  return data
+
+  const rows = data as Profile[] | null
+  const row = Array.isArray(rows) ? rows[0] : null
+  return row ?? null
 }

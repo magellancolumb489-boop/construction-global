@@ -17,11 +17,8 @@ export default async function AdminLayout({
 
   if (!user) notFound()
 
-  const { data: profile, error } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle()
+  const { data: profileRows, error } = await supabase.rpc("get_my_profile")
+  const profile = Array.isArray(profileRows) ? profileRows[0] : null
 
   if (error || profile?.role !== "admin") notFound()
 

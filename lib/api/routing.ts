@@ -2,10 +2,21 @@
 // proxies. Both endpoints are auth-gated and rate-limited server-side.
 // Keep all upstream URLs out of the browser so CSP remains tight.
 
+/** Structured address components parsed from Nominatim addressdetails */
+export interface GeocodeAddressParts {
+  street: string
+  city: string
+  county: string
+  country: string
+  postcode?: string
+}
+
 export interface GeocodeResult {
   lat: number
   lng: number
   displayName: string
+  /** Present when the user selects a geocoded suggestion (addressdetails=1). */
+  parts?: GeocodeAddressParts
 }
 
 export interface LatLng {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Loader2, MapPin } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,14 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import type { WizardFormState } from "@/lib/listing-wizard-form-state"
+import {
+  CONCRETE_CLASS_CATALOG,
+  CONCRETE_CLASS_ORDER,
+  CONSISTENCY_LABELS,
+  type ConcreteClassCode,
+  type ConcreteClassSelection,
+  type ConcreteConsistency,
+} from "@/lib/listing-wizard-types"
 
 const UNITS_CONCRETE = [
   { value: "M3", label: "Metri cubi (M3)" },
@@ -34,10 +42,40 @@ interface Props {
   categories: CategoryOption[]
 }
 
-/** Step 2 for concrete: pickup + geocode, transport modes, min order, price. */
+function selectionForClass(
+  rows: ConcreteClassSelection[],
+  code: ConcreteClassCode,
+): ConcreteClassSelection | undefined {
+  return rows.find((r) => r.classCode === code)
+}
+
+function upsertSelection(
+  rows: ConcreteClassSelection[],
+  code: ConcreteClassCode,
+  patch: Partial<ConcreteClassSelection>,
+): ConcreteClassSelection[] {
+  const idx = rows.findIndex((r) => r.classCode === code)
+  const base: ConcreteClassSelection =
+    idx >= 0
+      ? { ...rows[idx], ...patch }
+      : { classCode: code, consistencies: [], consistencyPrices: {}, ...patch }
+  if (idx >= 0) {
+    const next = [...rows]
+    next[idx] = base
+    return next
+  }
+  return [...rows, base]
+}
+
+function removeSelection(rows: ConcreteClassSelection[], code: ConcreteClassCode) {
+  return rows.filter((r) => r.classCode !== code)
+}
+
+/** Step 2 for concrete: beton classes, pickup + geocode, transport modes, min order, pricing grid. */
 export function WizardStepDetailsConcrete({ form, setForm, categories }: Props) {
   const [geocoding, setGeocoding] = useState(false)
   const [geoHint, setGeoHint] = useState<string | null>(null)
+  const didDefaultCifa = useRef(false)
 
   async function runGeocode() {
     const q = form.pickupAddress.trim()
@@ -70,6 +108,26 @@ export function WizardStepDetailsConcrete({ form, setForm, categories }: Props) 
       setGeocoding(false)
     }
   }
+
+  const hasPompabilSelection = useMemo(
+    () => form.concreteClasses.some((c) => c.consistencies.includes("pompabil")),
+    [form.concreteClasses],
+  )
+
+  // Default CIFA on first paint when both transport toggles are off (new listing UX).
+  useEffect(() => {
+    if (didDefaultCifa.current) return
+    if (!form.transportCifa && !form.transportPompa) {
+      didDefaultCifa.current = true
+      setForm((f) => ({ ...f, transportCifa: true }))
+    }
+  }, [form.transportCifa, form.transportPompa, setForm])
+
+  // Auto-check POMPA when any class includes "pompabil", until the seller touches POMPA manually.
+  useEffect(() => {
+    if (form.transportPompaUserTouched) return
+    setForm((f) => ({ ...f, transportPompa: hasPompabilSelection }))
+  }, [hasPompabilSelection, form.transportPompaUserTouched, setForm])
 
   return (
     <div className="space-y-6">
@@ -157,13 +215,169 @@ export function WizardStepDetailsConcrete({ form, setForm, categories }: Props) 
         </CardContent>
       </Card>
 
+      {/* Beton catalogue: appears before transport modes per product spec */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg leading-snug">
+            Betoane (clase standard) / Betoane după consistență *
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Selectati clasele oferite si consistentele (S3 D16 implicit pe eticheta). Pentru fiecare
+            consistenta bifata introduceti un pret separat (ex. Vârtos si Semivârtos pot avea preturi
+            diferite). Puteti bifa mai multe clase pe acelasi anunt.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {CONCRETE_CLASS_ORDER.map((code) => {
+              const meta = CONCRETE_CLASS_CATALOG[code]
+              const row = selectionForClass(form.concreteClasses, code)
+              const active = Boolean(row)
+              const subtitle = [
+                "S3 D16",
+                meta.bMark ? `(${meta.bMark})` : null,
+              ]
+                .filter(Boolean)
+                .join(" ")
+
+              return (
+                <div
+                  key={code}
+                  className="rounded-xl border border-border bg-card p-4 shadow-sm"
+                >
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <Checkbox
+                      checked={active}
+                      onCheckedChange={(c) => {
+                        const on = c === true
+                        setForm((f) => ({
+                          ...f,
+                          concreteClasses: on
+                            ? upsertSelection(f.concreteClasses, code, {
+                                consistencies: [],
+                                consistencyPrices: {},
+                              })
+                            : removeSelection(f.concreteClasses, code),
+                        }))
+                      }}
+                      className="mt-1"
+                    />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div>
+                        <span className="font-semibold text-foreground">{meta.label}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">{subtitle}</span>
+                      </div>
+                      {active && (
+                        <>
+                          <div className="flex flex-wrap gap-2">
+                            {meta.consistencies.map((cons) => {
+                              const checked = row!.consistencies.includes(cons)
+                              return (
+                                <label
+                                  key={cons}
+                                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-medium has-checked:border-primary has-checked:bg-primary/10"
+                                >
+                                  <Checkbox
+                                    checked={checked}
+                                    onCheckedChange={(c) => {
+                                      const nextOn = c === true
+                                      setForm((f) => {
+                                        const cur = selectionForClass(f.concreteClasses, code)
+                                        if (!cur) return f
+                                        const set = new Set(cur.consistencies)
+                                        const nextPrices = { ...cur.consistencyPrices }
+                                        if (nextOn) {
+                                          set.add(cons)
+                                          if (nextPrices[cons] === undefined) {
+                                            nextPrices[cons] = ""
+                                          }
+                                        } else {
+                                          set.delete(cons)
+                                          delete nextPrices[cons]
+                                        }
+                                        return {
+                                          ...f,
+                                          concreteClasses: upsertSelection(
+                                            f.concreteClasses,
+                                            code,
+                                            {
+                                              consistencies: [...set] as ConcreteConsistency[],
+                                              consistencyPrices: nextPrices,
+                                            },
+                                          ),
+                                        }
+                                      })
+                                    }}
+                                    className="h-3.5 w-3.5"
+                                  />
+                                  {CONSISTENCY_LABELS[cons]}
+                                </label>
+                              )
+                            })}
+                          </div>
+                          <div className="space-y-3">
+                            {meta.consistencies.map((cons) => {
+                              if (!row!.consistencies.includes(cons)) return null
+                              return (
+                                <div key={`${code}-${cons}`}>
+                                  <Label className="text-xs">
+                                    Preț / {form.unit} — {CONSISTENCY_LABELS[cons]} *
+                                  </Label>
+                                  <Input
+                                    type="number"
+                                    inputMode="decimal"
+                                    min={0}
+                                    step="0.01"
+                                    disabled={!active}
+                                    value={row?.consistencyPrices[cons] ?? ""}
+                                    onChange={(e) =>
+                                      setForm((f) => {
+                                        const cur = selectionForClass(f.concreteClasses, code)
+                                        if (!cur) return f
+                                        return {
+                                          ...f,
+                                          concreteClasses: upsertSelection(
+                                            f.concreteClasses,
+                                            code,
+                                            {
+                                              consistencyPrices: {
+                                                ...cur.consistencyPrices,
+                                                [cons]: e.target.value,
+                                              },
+                                            },
+                                          ),
+                                        }
+                                      })
+                                    }
+                                    className="mt-1 min-h-11"
+                                    placeholder="ex: 420"
+                                  />
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </label>
+                </div>
+              )
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Moduri de transport *</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            CIFA este optiunea principala. Daca oferiti beton pompabil, bifati si POMPA (sau lasati
+            bifarea automata activa).
+          </p>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap gap-6">
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex min-h-11 items-center gap-2 text-sm">
               <Checkbox
                 checked={form.transportCifa}
                 onCheckedChange={(c) =>
@@ -172,23 +386,18 @@ export function WizardStepDetailsConcrete({ form, setForm, categories }: Props) 
               />
               CIFA
             </label>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex min-h-11 items-center gap-2 text-sm">
               <Checkbox
                 checked={form.transportPompa}
                 onCheckedChange={(c) =>
-                  setForm((f) => ({ ...f, transportPompa: c === true }))
+                  setForm((f) => ({
+                    ...f,
+                    transportPompa: c === true,
+                    transportPompaUserTouched: true,
+                  }))
                 }
               />
               POMPĂ
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={form.transportVrac}
-                onCheckedChange={(c) =>
-                  setForm((f) => ({ ...f, transportVrac: c === true }))
-                }
-              />
-              VRAC
             </label>
           </div>
         </CardContent>
@@ -261,20 +470,7 @@ export function WizardStepDetailsConcrete({ form, setForm, categories }: Props) 
               </Select>
             </div>
           </div>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div>
-              <Label>Pret per unitate *</Label>
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
-                value={form.price}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, price: e.target.value }))
-                }
-                className="mt-1"
-              />
-            </div>
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <Label>Moneda</Label>
               <Select
@@ -309,6 +505,10 @@ export function WizardStepDetailsConcrete({ form, setForm, categories }: Props) 
               />
             </div>
           </div>
+          <p className="text-xs text-muted-foreground">
+            Pretul afisat in magazin va fi minimul dintre preturile pe clase selectate (de la …
+            {form.currency} / {form.unit}).
+          </p>
           <div>
             <Label>Descriere (optional)</Label>
             <Textarea

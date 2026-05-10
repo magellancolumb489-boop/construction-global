@@ -49,11 +49,11 @@ export function SellerActivationBanner({
           </div>
           <div className="min-w-0">
             <h3 className="text-sm font-bold text-foreground sm:text-base">
-              Deveniti vanzator
+              Deveniți vânzător
             </h3>
             <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-              Activati contul de vanzator ca sa publicati anunturi, licitatii si sa accesati dashboard-ul.
-              Platile se vor activa separat dupa configurarea Stripe.
+              Activați contul de vânzător ca să publicați anunțuri, licitații și să accesați dashboard-ul.
+              Plățile se vor activa separat după configurarea Stripe.
             </p>
           </div>
         </div>
@@ -75,7 +75,7 @@ export function SellerActivationBanner({
             className="h-10 rounded-xl bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
           >
             {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Activeaza vanzator
+            Activați vânzător
           </Button>
         </div>
       </div>

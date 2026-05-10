@@ -16,6 +16,7 @@ import {
   uploadListingImage,
   deleteListingImage,
   checkSlugAvailable,
+  upsertConcreteClasses,
   type Listing,
   type ListingInsert,
   type ListingUpdate,
@@ -33,9 +34,15 @@ import {
   emptyWizardState,
   wizardStateFromListing,
   transportModesFromFlags,
+  concreteSelectionsToRpcPayload,
+  type ListingConcreteClassRow,
   type WizardFormState,
 } from "@/lib/listing-wizard-form-state"
-import type { ListingWizardType } from "@/lib/listing-wizard-types"
+import {
+  CONCRETE_CLASS_CATALOG,
+  CONSISTENCY_LABELS,
+  type ListingWizardType,
+} from "@/lib/listing-wizard-types"
 
 interface CategoryOption {
   id: number
@@ -53,6 +60,8 @@ interface ListingFormProps {
   editMode?: boolean
   listing?: Listing
   existingImages?: ExistingImage[]
+  /** Hydrates concrete class rows in edit mode (from `getListingForEdit` join). */
+  existingConcreteClasses?: ListingConcreteClassRow[]
 }
 
 function slugify(text: string): string {
@@ -76,8 +85,36 @@ function hasMeaningfulWizardData(f: WizardFormState): boolean {
       f.transportFee.trim() ||
       f.minOrderQty.trim() ||
       f.serviceArea.trim() ||
-      f.equipmentModel.trim(),
+      f.equipmentModel.trim() ||
+      f.concreteClasses.length > 0,
   )
+}
+
+/** Validates selected classes, allowed consistencies per class, and positive prices. */
+function validateConcreteClasses(f: WizardFormState): string | null {
+  if (f.concreteClasses.length === 0) {
+    return "Selectati cel putin o clasa de beton."
+  }
+  for (const row of f.concreteClasses) {
+    const cat = CONCRETE_CLASS_CATALOG[row.classCode]
+    if (!cat) return "Clasa de beton invalida."
+    if (row.consistencies.length === 0) {
+      return `Selectati cel putin o consistenta pentru ${row.classCode}.`
+    }
+    for (const cons of row.consistencies) {
+      if (!cat.consistencies.includes(cons)) {
+        return `Consistenta selectata nu este valabila pentru ${row.classCode}.`
+      }
+    }
+    for (const cons of row.consistencies) {
+      const raw = row.consistencyPrices[cons]
+      const p = raw != null && String(raw).trim() !== "" ? Number(raw) : Number.NaN
+      if (!Number.isFinite(p) || p <= 0) {
+        return `Introduceti un pret valid (pozitiv) pentru ${CONSISTENCY_LABELS[cons]} la ${row.classCode}.`
+      }
+    }
+  }
+  return null
 }
 
 /** Step-local validation before Continue. */
@@ -100,13 +137,14 @@ function validateDetailsStep(t: ListingWizardType, f: WizardFormState): string |
       if (f.pickupLat == null || f.pickupLng == null) {
         return "Geocodati adresa sau introduceti latitudinea si longitudinea."
       }
-      if (!f.transportCifa && !f.transportPompa && !f.transportVrac) {
-        return "Selectati cel putin un mod de transport (CIFA, POMPĂ sau VRAC)."
+      const concreteErr = validateConcreteClasses(f)
+      if (concreteErr) return concreteErr
+      if (!f.transportCifa && !f.transportPompa) {
+        return "Selectati cel putin un mod de transport (CIFA sau POMPA)."
       }
       if (!f.minOrderQty.trim() || Number(f.minOrderQty) <= 0) {
         return "Comanda minima trebuie sa fie mai mare ca zero."
       }
-      if (!f.price.trim() || Number(f.price) < 0) return "Pretul este obligatoriu."
       if (f.unit !== "M3" && f.unit !== "TON") {
         return "Pentru beton, unitatea trebuie sa fie M3 sau TON."
       }
@@ -156,18 +194,23 @@ function toListingPayload(
     category_id: form.categoryId ? Number(form.categoryId) : null,
     currency: form.currency,
     is_active: active,
+    seller_assumes_transport: form.sellerAssumesTransport,
   }
 
   if (lt === "concrete") {
-    const modes = transportModesFromFlags(
-      form.transportCifa,
-      form.transportPompa,
-      form.transportVrac,
-    )
+    const modes = transportModesFromFlags(form.transportCifa, form.transportPompa)
+    const prices: number[] = []
+    for (const c of form.concreteClasses) {
+      for (const cons of c.consistencies) {
+        const n = Number(c.consistencyPrices[cons])
+        if (Number.isFinite(n) && n > 0) prices.push(n)
+      }
+    }
+    const minPrice = prices.length ? Math.min(...prices) : Number.NaN
     const firstLine = form.pickupAddress.split("\n")[0]?.trim() || null
     return {
       ...base,
-      price: Number(form.price),
+      price: minPrice,
       unit: form.unit,
       available_qty: Number(form.availableQty) >= 0 ? Number(form.availableQty) : 0,
       location: firstLine,
@@ -252,13 +295,16 @@ export function ListingForm({
   editMode = false,
   listing,
   existingImages = [],
+  existingConcreteClasses,
 }: ListingFormProps) {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [step, setStep] = useState(1)
   const [form, setForm] = useState<WizardFormState>(() =>
-    editMode && listing ? wizardStateFromListing(listing) : emptyWizardState(),
+    editMode && listing
+      ? wizardStateFromListing(listing, existingConcreteClasses)
+      : emptyWizardState(),
   )
 
   const [newFiles, setNewFiles] = useState<File[]>([])
@@ -382,6 +428,18 @@ export function ListingForm({
           setSaving(false)
           return
         }
+        if (form.listingType === "concrete") {
+          const rpcRows = concreteSelectionsToRpcPayload(form.concreteClasses)
+          const up = await upsertConcreteClasses(listing.id, rpcRows)
+          if (!up.success) {
+            setError(
+              up.error ??
+                "Anuntul a fost salvat, dar clasele de beton nu. Reincercati din editare.",
+            )
+            setSaving(false)
+            return
+          }
+        }
         for (const imgId of deletedImageIds) {
           const img = existingImages.find((i) => i.id === imgId)
           if (img) await deleteListingImage(img.id, img.storage_path)
@@ -406,6 +464,18 @@ export function ListingForm({
         setError(res.error ?? "Eroare la creare.")
         setSaving(false)
         return
+      }
+      if (form.listingType === "concrete") {
+        const rpcRows = concreteSelectionsToRpcPayload(form.concreteClasses)
+        const up = await upsertConcreteClasses(res.data.id, rpcRows)
+        if (!up.success) {
+          setError(
+            up.error ??
+              "Anuntul a fost creat, dar clasele de beton nu. Completati din editare.",
+          )
+          setSaving(false)
+          return
+        }
       }
       for (let i = 0; i < newFiles.length; i++) {
         await uploadListingImage(res.data.id, newFiles[i], i)

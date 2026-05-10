@@ -15,7 +15,11 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Filter, Gavel, X } from "lucide-react"
-import { getAuctionsFiltered } from "@/lib/api/auctions-client"
+import {
+  MOCK_AUCTION_LIST_ITEMS,
+  filterMockAuctions,
+  type AuctionSortShell,
+} from "@/lib/auction-shell/mock-data"
 import type { AuctionListItem, AuctionStatus } from "@/types/domain"
 
 interface CategoryOption {
@@ -64,16 +68,18 @@ export function AuctionsContent({ initialAuctions, initialTotal, categories }: A
     setLoading(true)
     setError(false)
     try {
-      const filters: Parameters<typeof getAuctionsFiltered>[0] = {
-        sort: sort as "ending_soon" | "newest" | "highest_bid",
-      }
-      if (selectedFilters.status?.length === 1) {
-        filters.status = selectedFilters.status[0] as AuctionStatus
-      }
-      if (selectedFilters.category?.length === 1) {
-        filters.categoryId = Number(selectedFilters.category[0])
-      }
-      const data = await getAuctionsFiltered(filters)
+      const catId =
+        selectedFilters.category?.length === 1 ? selectedFilters.category[0] : undefined
+      const categoryName =
+        catId != null ? categories.find((c) => String(c.id) === catId)?.name ?? null : null
+      const data = filterMockAuctions(MOCK_AUCTION_LIST_ITEMS, {
+        sort: sort as AuctionSortShell,
+        status:
+          selectedFilters.status?.length === 1
+            ? (selectedFilters.status[0] as AuctionStatus)
+            : undefined,
+        categoryName,
+      })
       setAuctions(data.items)
       setTotal(data.total)
     } catch {
@@ -81,7 +87,7 @@ export function AuctionsContent({ initialAuctions, initialTotal, categories }: A
     } finally {
       setLoading(false)
     }
-  }, [sort, selectedFilters])
+  }, [sort, selectedFilters, categories])
 
   const [didMount, setDidMount] = useState(false)
   useEffect(() => {

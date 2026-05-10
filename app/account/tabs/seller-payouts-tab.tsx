@@ -8,8 +8,8 @@ export function SellerPayoutsTab() {
       <h2 className="text-lg font-bold text-foreground">Payouts</h2>
       <StripeSeamCard
         icon={Wallet}
-        title="Plati catre vanzatori"
-        description="Conectati-va contul Stripe Connect pentru a primi incasarile automat, cu raportare si facturare integrate."
+        title="Plăți către vânzători"
+        description="Conectați-vă contul Stripe Connect pentru a primi încasările automat, cu raportare și facturare integrate."
         bulletPoints={[
           "Transferuri automate in contul bancar",
           "Comisioane vizibile pe fiecare tranzactie",

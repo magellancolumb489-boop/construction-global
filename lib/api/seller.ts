@@ -22,17 +22,7 @@ export async function getSellerDashboard(): Promise<SellerDashboard> {
   } = await supabase.auth.getUser()
   if (!user) return empty()
 
-  const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-
-  const [
-    listingsActive,
-    listingsTotal,
-    auctionsActive,
-    auctionsLive,
-    bids30d,
-    reviewsRes,
-    unreadRes,
-  ] = await Promise.all([
+  const [listingsActive, listingsTotal, reviewsRes, unreadRes] = await Promise.all([
     supabase
       .from("marketplace_listings")
       .select("id", { count: "exact", head: true })
@@ -42,22 +32,7 @@ export async function getSellerDashboard(): Promise<SellerDashboard> {
       .from("marketplace_listings")
       .select("id", { count: "exact", head: true })
       .eq("seller_id", user.id),
-    supabase
-      .from("auction_lots")
-      .select("id", { count: "exact", head: true })
-      .eq("seller_id", user.id)
-      .in("status", ["scheduled", "active"]),
-    supabase
-      .from("auction_lots")
-      .select("id", { count: "exact", head: true })
-      .eq("seller_id", user.id)
-      .eq("status", "active"),
-    // Bids across auctions owned by the caller in the last 30 days.
-    countSellerBidsSince(user.id, since30d),
-    supabase
-      .from("reviews")
-      .select("rating")
-      .eq("target_user_id", user.id),
+    supabase.from("reviews").select("rating").eq("target_user_id", user.id),
     countUnreadMessagesForUser(user.id),
   ])
 
@@ -70,32 +45,15 @@ export async function getSellerDashboard(): Promise<SellerDashboard> {
   return {
     activeListings: listingsActive.count ?? 0,
     totalListings: listingsTotal.count ?? 0,
-    activeAuctions: auctionsActive.count ?? 0,
-    liveAuctions: auctionsLive.count ?? 0,
-    totalBids30d: bids30d,
+    activeAuctions: 0,
+    liveAuctions: 0,
+    totalBids30d: 0,
     lifetimeRevenue: 0,
     avgRating: avg,
     reviewsCount: reviewRows.length,
     pendingPayouts: 0,
     unreadMessages: unreadRes,
   }
-}
-
-async function countSellerBidsSince(sellerId: string, since: string): Promise<number> {
-  const supabase = await createClient()
-  // Get seller's lot ids first, then count bids in range.
-  const { data: lots } = await supabase
-    .from("auction_lots")
-    .select("id")
-    .eq("seller_id", sellerId)
-  const lotIds = (lots ?? []).map((l) => l.id)
-  if (lotIds.length === 0) return 0
-  const { count } = await supabase
-    .from("auction_bids")
-    .select("id", { count: "exact", head: true })
-    .in("lot_id", lotIds)
-    .gte("created_at", since)
-  return count ?? 0
 }
 
 async function countUnreadMessagesForUser(userId: string): Promise<number> {

@@ -1,6 +1,5 @@
 import type { Profile } from "@/lib/api/profile-client"
 import type { Listing } from "@/lib/api/listings-client"
-import type { AuctionLot } from "@/lib/api/auctions"
 import type { UserAddress } from "@/lib/api/addresses"
 import type { WishlistEntry } from "@/lib/api/wishlist"
 import type { ReviewWithContext } from "@/lib/api/reviews"
@@ -10,11 +9,19 @@ import type { LoginEvent } from "@/lib/api/security"
 import type { DeletionRequest } from "@/lib/api/privacy"
 import type { NotificationPrefs } from "@/lib/api/notification-prefs"
 
-export interface MyListing extends Listing {
+/** Seller auction row shape (shell tab; DB auctions stand-down — list stays empty). */
+export interface MyAuction {
+  id: number
+  slug: string
+  title: string
   category_name: string
+  status: string
+  current_price: number
+  currency: string
+  bid_count: number
 }
 
-export interface MyAuction extends AuctionLot {
+export interface MyListing extends Listing {
   category_name: string
 }
 

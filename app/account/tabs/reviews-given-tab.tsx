@@ -32,7 +32,7 @@ export function ReviewsGivenTab({ reviews }: ReviewsGivenTabProps) {
       <EmptyState
         icon={Star}
         title="Nicio recenzie scrisa"
-        description="Dupa prima comanda finalizata veti putea lasa o recenzie vanzatorului."
+        description="După prima comandă finalizată veți putea lăsa o recenzie vânzătorului."
       />
     )
   }
@@ -45,7 +45,7 @@ export function ReviewsGivenTab({ reviews }: ReviewsGivenTabProps) {
           <div className="mb-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-foreground">
-                Pentru {r.target_display_name || "vanzator"}
+                Pentru {r.target_display_name || "vânzător"}
               </p>
               <p className="truncate text-[11px] text-muted-foreground">
                 {r.listing_title || r.auction_title || "Recenzie generala"} · {new Date(r.created_at).toLocaleDateString("ro-RO")}

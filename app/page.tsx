@@ -12,7 +12,10 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { AuctionCard } from "@/components/shared/auction-card";
 import { ProductCard } from "@/components/shared/product-card";
-import { getAuctions } from "@/lib/api/auctions";
+import {
+  MOCK_AUCTION_LIST_ITEMS,
+  filterMockAuctions,
+} from "@/lib/auction-shell/mock-data";
 import { getProductListItems } from "@/lib/api/listings";
 
 /** Category shortcuts — marketplace entry points */
@@ -60,11 +63,17 @@ const heroKeyPoints = [
 
 export default async function HomePage() {
   const [auctionsData, productsData] = await Promise.all([
-    getAuctions({ status: "active", sort: "ending_soon" }),
+    Promise.resolve(
+      filterMockAuctions(MOCK_AUCTION_LIST_ITEMS, {
+        status: "active",
+        sort: "ending_soon",
+        limit: 4,
+      }),
+    ),
     getProductListItems({ sort: "newest", limit: 4 }),
   ]);
 
-  const endingSoonAuctions = auctionsData.items.slice(0, 4);
+  const endingSoonAuctions = auctionsData.items;
   const popularProducts = productsData.items;
   const auctionCount = endingSoonAuctions.length;
   const productCount = popularProducts.length;

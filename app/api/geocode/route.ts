@@ -35,10 +35,39 @@ function isRateLimited(key: string): boolean {
   return false
 }
 
+/** Nominatim address sub-object returned when addressdetails=1 */
+interface NominatimAddress {
+  road?: string
+  house_number?: string
+  city?: string
+  town?: string
+  village?: string
+  municipality?: string
+  suburb?: string
+  county?: string
+  state?: string
+  country?: string
+  postcode?: string
+}
+
 interface NominatimResult {
   lat: string
   lon: string
   display_name: string
+  address?: NominatimAddress
+}
+
+/** Normalize Nominatim address sub-object into the parts shape the UI consumes */
+function normalizeParts(addr: NominatimAddress | undefined) {
+  if (!addr) return undefined
+  const roadParts = [addr.road, addr.house_number].filter(Boolean)
+  const street = roadParts.join(" ") || ""
+  const city =
+    addr.city ?? addr.town ?? addr.village ?? addr.municipality ?? addr.suburb ?? ""
+  const county = addr.county ?? addr.state ?? ""
+  const country = addr.country ?? ""
+  const postcode = addr.postcode
+  return { street, city, county, country, ...(postcode ? { postcode } : {}) }
 }
 
 export async function GET(req: NextRequest) {
@@ -71,8 +100,10 @@ export async function GET(req: NextRequest) {
     )
   }
 
+  // addressdetails=1 returns a structured address sub-object so we can
+  // split the result into street / city / county / country for autofill.
   const url =
-    "https://nominatim.openstreetmap.org/search?format=json&q=" +
+    "https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q=" +
     encodeURIComponent(q) +
     `&limit=${limit}&countrycodes=ro`
 
@@ -105,6 +136,7 @@ export async function GET(req: NextRequest) {
         lat: parseFloat(row.lat),
         lng: parseFloat(row.lon),
         displayName: row.display_name,
+        parts: normalizeParts(row.address),
       })),
     })
   }
@@ -118,5 +150,6 @@ export async function GET(req: NextRequest) {
     lat: parseFloat(first.lat),
     lng: parseFloat(first.lon),
     displayName: first.display_name,
+    parts: normalizeParts(first.address),
   })
 }

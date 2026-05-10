@@ -3,7 +3,10 @@ import { Gavel } from "lucide-react"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
 import { AuctionsContent } from "./auctions-content"
 import { AuctionCardSkeleton } from "@/components/shared/skeletons"
-import { getAuctions } from "@/lib/api/auctions"
+import {
+  MOCK_AUCTION_LIST_ITEMS,
+  filterMockAuctions,
+} from "@/lib/auction-shell/mock-data"
 import { getCategories } from "@/lib/api/categories"
 
 export const metadata = {
@@ -23,7 +26,9 @@ function AuctionsLoading() {
 
 export default async function AuctionsPage() {
   const [auctionsData, categories] = await Promise.all([
-    getAuctions({ sort: "ending_soon" }),
+    Promise.resolve(
+      filterMockAuctions(MOCK_AUCTION_LIST_ITEMS, { sort: "ending_soon" }),
+    ),
     getCategories(),
   ])
 
