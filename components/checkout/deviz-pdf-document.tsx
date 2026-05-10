@@ -12,6 +12,7 @@ import {
   StyleSheet,
 } from "@react-pdf/renderer"
 import type { PlacedOrder } from "@/app/checkout/actions"
+import { orderLineSnapshotSubline } from "@/lib/checkout/order-line-snapshot-detail"
 
 type Snapshot = Record<string, unknown> | null
 function readString(s: Snapshot, key: string): string {
@@ -268,21 +269,14 @@ export function DevizPdfDocument({ order }: DevizPdfDocumentProps) {
           </View>
           {order.lines.map((line) => {
             const snap = (line.snapshot_json ?? {}) as Record<string, unknown>
-            const klass =
-              typeof snap["concrete_class_code"] === "string"
-                ? (snap["concrete_class_code"] as string)
-                : ""
-            const cons =
-              typeof snap["concrete_consistency"] === "string"
-                ? (snap["concrete_consistency"] as string)
-                : ""
+            const subline = orderLineSnapshotSubline(snap)
             return (
               <View key={line.id} style={styles.tbodyRow} wrap={false}>
                 <View style={styles.tdProduct}>
                   <Text>{line.title}</Text>
-                  {(klass || cons) !== "" && (
+                  {subline !== null && subline !== "" && (
                     <Text style={{ fontSize: 8, color: "#64748b", marginTop: 2 }}>
-                      {[klass, cons].filter(Boolean).join(" · ")}
+                      {subline}
                     </Text>
                   )}
                 </View>

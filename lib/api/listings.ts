@@ -1,6 +1,10 @@
 import { createClient } from "@/lib/supabase/server"
 import type { Tables } from "@/types/supabase"
 import {
+  embedMaterialSpec,
+  embedMaterialTransport,
+} from "@/lib/listing-material-embed"
+import {
   concreteSelectionsFromRows,
   type ListingConcreteClassRow,
 } from "@/lib/listing-wizard-form-state"
@@ -10,6 +14,7 @@ import type {
   Currency,
   ProductUnit,
   ListingKind,
+  ProductMaterialLogistics,
 } from "@/types/domain"
 
 export type Listing = Tables<"marketplace_listings">
@@ -19,6 +24,13 @@ export interface ListingWithImages extends Listing {
   marketplace_listing_images: ListingImage[]
   /** Present when migration `20260510120000_concrete_classes` is applied. */
   marketplace_listing_concrete_classes?: ListingConcreteClassRow[]
+  marketplace_listing_material_spec?:
+    | Tables<"marketplace_listing_material_spec">
+    | Tables<"marketplace_listing_material_spec">[]
+    | null
+  marketplace_listing_material_transport?:
+    | Tables<"marketplace_listing_material_transport">[]
+    | null
 }
 
 export interface ListingsFilter {
@@ -93,6 +105,30 @@ export function toProductDetail(
           listing.marketplace_listing_concrete_classes ?? null,
         )
       : []
+
+  let materialLogistics: ProductMaterialLogistics | null = null
+  if (kind === "materials") {
+    const ms = embedMaterialSpec(listing.marketplace_listing_material_spec)
+    if (ms) {
+      const tr = embedMaterialTransport(listing.marketplace_listing_material_transport)
+      materialLogistics = {
+        categoryCode: ms.category_code,
+        materialCode: ms.material_code,
+        maxPieceLengthM: ms.max_piece_length_m,
+        palletSacKg: ms.pallet_sac_kg,
+        palletPieces: ms.pallet_pieces,
+        palletTotalKg: ms.pallet_total_kg,
+        macaraAddon: ms.macara_addon,
+        macaraFee: ms.macara_fee,
+        allowNonBulkTransport: ms.allow_non_bulk_transport,
+        transportOffers: tr.map((r) => ({
+          vehicleCode: r.vehicle_code,
+          payloadT: r.payload_t,
+        })),
+      }
+    }
+  }
+
   return {
     ...toProductListItem(listing, categoryName, listing.marketplace_listing_images[0]?.storage_path),
     listingKind: kind,
@@ -112,6 +148,7 @@ export function toProductDetail(
     transportModes: listing.transport_modes ?? null,
     serviceArea: listing.service_area ?? null,
     concreteClasses,
+    materialLogistics,
   }
 }
 
@@ -287,7 +324,9 @@ export async function getListingForEdit(id: number): Promise<ListingWithImages |
 
   const { data, error } = await supabase
     .from("marketplace_listings")
-    .select("*, marketplace_listing_images(*), marketplace_listing_concrete_classes(*)")
+    .select(
+      "*, marketplace_listing_images(*), marketplace_listing_concrete_classes(*), marketplace_listing_material_spec(*), marketplace_listing_material_transport(*)",
+    )
     .eq("id", id)
     .eq("seller_id", user.id)
     .single()
@@ -323,7 +362,7 @@ export async function getProductDetailFromListing(slug: string): Promise<Product
   const { data, error } = await (supabase as any)
     .from("marketplace_listings")
     .select(
-      "*, marketplace_listing_images(*), marketplace_listing_concrete_classes(*), categories(name), public_profiles(display_name, company_name, entity_type)",
+      "*, marketplace_listing_images(*), marketplace_listing_concrete_classes(*), marketplace_listing_material_spec(*), marketplace_listing_material_transport(*), categories(name), public_profiles(display_name, company_name, entity_type)",
     )
     .eq("slug", slug)
     .eq("is_active", true)

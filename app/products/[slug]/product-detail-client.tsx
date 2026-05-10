@@ -74,11 +74,17 @@ function ProductPurchaseBlock({
   const qtyFieldId = useId()
 
   const isConcrete = product.listingKind === "concrete"
-  const allowQty = product.listingKind === "materials"
+  const needsMaterialsConfigurator =
+    product.listingKind === "materials" && product.materialLogistics != null
+  const allowQty =
+    product.listingKind === "materials" && !needsMaterialsConfigurator
   const maxQ = Math.max(1, product.availableQty)
 
   function handleContinueToConfigure() {
-    saveConfigureDraft(product, 1)
+    const q = isConcrete
+      ? 1
+      : Math.min(Math.max(1, qty), maxQ)
+    saveConfigureDraft(product, q)
     router.push("/cart/configurare")
   }
 
@@ -116,9 +122,41 @@ function ProductPurchaseBlock({
     })
   }
 
-  if (isConcrete) {
+  if (isConcrete || needsMaterialsConfigurator) {
     return (
       <div className="space-y-2">
+        {needsMaterialsConfigurator && product.availableQty > 0 && (
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <Label htmlFor={qtyFieldId} className="text-xs text-muted-foreground">
+                Cantitate
+              </Label>
+              <Input
+                id={qtyFieldId}
+                type="number"
+                min={1}
+                max={maxQ}
+                value={qty}
+                onChange={(e) =>
+                  onQtyChange(Math.max(1, Math.min(maxQ, Number(e.target.value) || 1)))
+                }
+                className="mt-1 h-11 rounded-xl"
+              />
+            </div>
+          </div>
+        )}
+        {needsMaterialsConfigurator &&
+          product.transportFee != null &&
+          product.transportFee > 0 && (
+            <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+              Transport per cursă (înmulțit cu numărul de curse la configurare):{" "}
+              <MoneyDisplay
+                amount={product.transportFee}
+                currency={product.currency}
+                className="inline font-semibold text-foreground"
+              />
+            </p>
+          )}
         <Button
           className="h-12 w-full rounded-2xl bg-foreground text-base font-bold text-background shadow-md hover:bg-foreground/90 active:scale-[0.98] transition-all"
           onClick={handleContinueToConfigure}
@@ -128,8 +166,9 @@ function ProductPurchaseBlock({
           <ArrowRight className="ml-2 h-5 w-5" />
         </Button>
         <p className="text-center text-[11px] text-muted-foreground leading-snug px-1">
-          Cantitatea, TVA-ul, transportul si oferta finala se stabilesc in calculator si in cos,
-          inainte de comanda.
+          {isConcrete
+            ? "Cantitatea, TVA-ul, transportul si oferta finala se stabilesc in calculator si in cos, inainte de comanda."
+            : "Alegeti varianta de transport, TVA-ul si totalul se calculeaza la configurare."}
         </p>
       </div>
     )

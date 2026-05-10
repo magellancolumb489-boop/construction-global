@@ -1,6 +1,7 @@
 "use client"
 
 import type { PlacedOrder } from "@/app/checkout/actions"
+import { orderLineSnapshotSubline } from "@/lib/checkout/order-line-snapshot-detail"
 import { formatMoney } from "@/components/shared/money-display"
 import type { Currency } from "@/types/domain"
 
@@ -188,20 +189,13 @@ export function DevizPreview({ order, compact = false }: DevizPreviewProps) {
           <tbody>
             {order.lines.map((line) => {
               const snap = (line.snapshot_json ?? {}) as Record<string, unknown>
-              const klass = typeof snap["concrete_class_code"] === "string"
-                ? (snap["concrete_class_code"] as string)
-                : ""
-              const cons = typeof snap["concrete_consistency"] === "string"
-                ? (snap["concrete_consistency"] as string)
-                : ""
+              const subline = orderLineSnapshotSubline(snap)
               return (
                 <tr key={line.id} className="border-t border-slate-100">
                   <td className="px-3 py-2 align-top">
                     <p className="font-medium text-slate-900">{line.title}</p>
-                    {(klass || cons) && (
-                      <p className="mt-0.5 text-[11px] text-slate-500">
-                        {[klass, cons].filter(Boolean).join(" · ")}
-                      </p>
+                    {subline && (
+                      <p className="mt-0.5 text-[11px] text-slate-500">{subline}</p>
                     )}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">

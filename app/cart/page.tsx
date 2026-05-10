@@ -12,6 +12,7 @@ import { Breadcrumbs } from "@/components/layout/breadcrumbs"
 import { MoneyDisplay } from "@/components/shared/money-display"
 import { EmptyState } from "@/components/shared/empty-state"
 import { CONSISTENCY_LABELS } from "@/lib/listing-wizard-types"
+import { VEHICLE_LABELS, type VehicleCode } from "@/lib/materials-logistics/catalog"
 import { useCart } from "@/lib/cart-context"
 
 export default function CartPage() {
@@ -80,6 +81,18 @@ export default function CartPage() {
                             className="inline"
                           />
                           /{item.configureConcreteSelection.unit})
+                        </p>
+                      )}
+                      {item.configureMaterialsSelection && (
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          Transport:{" "}
+                          {VEHICLE_LABELS[item.configureMaterialsSelection.vehicleCode as VehicleCode]}{" "}
+                          {item.configureMaterialsSelection.payloadT}t ·{" "}
+                          {item.configureMaterialsSelection.trips} cursă
+                          {item.configureMaterialsSelection.marketplaceAssigned
+                            ? " · propus platformă"
+                            : ""}
+                          {item.configureMaterialsSelection.macaraAddon ? " · +macara" : ""}
                         </p>
                       )}
                       <p className="text-sm text-muted-foreground">

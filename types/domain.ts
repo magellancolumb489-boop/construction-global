@@ -56,7 +56,36 @@ export interface BidRow {
 }
 
 // Product / Marketplace
-export type ProductUnit = "TON" | "KG" | "M3" | "BUC" | "ML"
+export type ProductUnit = "TON" | "KG" | "M3" | "BUC" | "ML" | "CUP" | "CAMION"
+
+/** Logistics snapshot for materials listings (joined from Supabase child tables). */
+export interface ProductMaterialTransportOffer {
+  vehicleCode: string
+  payloadT: number
+}
+
+export interface ProductMaterialLogistics {
+  categoryCode: string
+  materialCode: string
+  maxPieceLengthM: number | null
+  palletSacKg: number | null
+  palletPieces: number | null
+  palletTotalKg: number | null
+  macaraAddon: boolean
+  macaraFee: number | null
+  allowNonBulkTransport: boolean
+  transportOffers: ProductMaterialTransportOffer[]
+}
+
+/** Selection persisted on cart line after materials configurare + validated la checkout. */
+export interface CartMaterialsSelection {
+  vehicleCode: string
+  payloadT: number
+  trips: number
+  macaraAddon: boolean
+  palletCount: number | null
+  marketplaceAssigned: boolean
+}
 
 /** Mirrors marketplace_listings.listing_type — drives PDP and cart behaviour. */
 export type ListingKind = "concrete" | "materials" | "equipment" | "services"
@@ -113,6 +142,8 @@ export interface ProductDetail extends ProductListItem {
    * goală pentru non-beton sau anunțuri vechi fără migrare.
    */
   concreteClasses: ConcreteClassSelection[]
+  /** Present when listing_type=materials și există rând în marketplace_listing_material_spec. */
+  materialLogistics: ProductMaterialLogistics | null
 }
 
 /** Snapshot of livrare + fiscal from configurare; also stored for checkout prefill */
@@ -170,6 +201,8 @@ export interface CartItem {
   transportFee?: number
   /** Detaliu beton după configurare (clasă + consistență + preț unitar folosit). */
   configureConcreteSelection?: CartConcreteSelection
+  /** Plan transport materiale după configurare (validat în place_order). */
+  configureMaterialsSelection?: CartMaterialsSelection
 }
 
 // Orders

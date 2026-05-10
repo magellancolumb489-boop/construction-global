@@ -2,6 +2,7 @@
 // SendGrid/Mailgun adapter just renders it to a string. No Tailwind.
 
 import type { PlacedOrder } from "@/app/checkout/actions"
+import { orderLineSnapshotSubline } from "@/lib/checkout/order-line-snapshot-detail"
 
 type Snapshot = Record<string, unknown> | null
 function readString(s: Snapshot, key: string): string {
@@ -171,7 +172,10 @@ export function EmailBuyerTemplate({ order }: EmailBuyerTemplateProps) {
                         </tr>
                       </thead>
                       <tbody>
-                        {order.lines.map((line) => (
+                        {order.lines.map((line) => {
+                          const snap = (line.snapshot_json ?? {}) as Record<string, unknown>
+                          const subline = orderLineSnapshotSubline(snap)
+                          return (
                           <tr key={line.id}>
                             <td
                               style={{
@@ -181,6 +185,18 @@ export function EmailBuyerTemplate({ order }: EmailBuyerTemplateProps) {
                               }}
                             >
                               <div style={{ fontWeight: 600 }}>{line.title}</div>
+                              {subline && (
+                                <div
+                                  style={{
+                                    color: palette.muted,
+                                    fontSize: 10,
+                                    marginTop: 3,
+                                    lineHeight: 1.35,
+                                  }}
+                                >
+                                  {subline}
+                                </div>
+                              )}
                               <div
                                 style={{
                                   color: palette.muted,
@@ -204,7 +220,8 @@ export function EmailBuyerTemplate({ order }: EmailBuyerTemplateProps) {
                               {formatRO(line.line_total_cents, currency)}
                             </td>
                           </tr>
-                        ))}
+                          )
+                        })}
                       </tbody>
                     </table>
                   </td>

@@ -12,6 +12,7 @@ import { Breadcrumbs } from "@/components/layout/breadcrumbs"
 import PriceCalculator, {
   type FlowQuoteSnapshot,
 } from "@/components/shared/calc-price"
+import { ConfigureMaterialsOrder } from "@/app/cart/configurare/configure-materials-order"
 import { useCart } from "@/lib/cart-context"
 import {
   clearConfigureDraft,
@@ -349,6 +350,10 @@ export function ConfigureOrderClient() {
   }
 
   const { product, qty } = draft
+
+  if (product.listingKind === "materials" && product.materialLogistics) {
+    return <ConfigureMaterialsOrder product={product} initialQty={qty} />
+  }
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">

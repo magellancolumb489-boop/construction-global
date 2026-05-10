@@ -43,6 +43,7 @@ export function readConfigureDraft(): ConfigureDraftV1 | null {
       sellerPhone: p.sellerPhone ?? null,
       // Ciorne vechi fără join beton — array gol; server reîmprospătează la nevoie.
       concreteClasses: p.concreteClasses ?? [],
+      materialLogistics: p.materialLogistics ?? null,
     }
     return parsed
   } catch {

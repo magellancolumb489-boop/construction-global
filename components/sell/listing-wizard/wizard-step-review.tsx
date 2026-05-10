@@ -3,6 +3,13 @@ import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import type { WizardFormState } from "@/lib/listing-wizard-form-state"
 import { CONCRETE_CLASS_CATALOG, CONSISTENCY_LABELS, type ListingWizardType } from "@/lib/listing-wizard-types"
+import {
+  MATERIAL_CATEGORY_LABELS,
+  MATERIAL_LABELS,
+  VEHICLE_LABELS,
+  type MaterialCategoryCode,
+  type VehicleCode,
+} from "@/lib/materials-logistics/catalog"
 
 const TYPE_LABELS: Record<ListingWizardType, string> = {
   concrete: "Beton cu transport",
@@ -92,12 +99,62 @@ export function WizardStepReview({ form, setForm }: Props) {
             </>
           )}
           {t === "materials" && (
-            <div className="flex justify-between gap-4 border-b border-border/50 py-2">
-              <dt className="text-muted-foreground">Transport fix</dt>
-              <dd className="font-medium">
-                {form.transportFee || "0"} {form.currency}
-              </dd>
-            </div>
+            <>
+              <div className="flex justify-between gap-4 border-b border-border/50 py-2">
+                <dt className="text-muted-foreground shrink-0">Material</dt>
+                <dd className="max-w-[65%] text-right text-xs font-medium">
+                  {form.materialCategoryCode ? (
+                    <>
+                      {MATERIAL_CATEGORY_LABELS[form.materialCategoryCode as MaterialCategoryCode]}{" "}
+                      — {MATERIAL_LABELS[form.materialCode] ?? form.materialCode}
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </dd>
+              </div>
+              {form.materialTransportRows.some((r) => r.vehicleCode.trim()) ? (
+                <div className="flex justify-between gap-4 border-b border-border/50 py-2">
+                  <dt className="text-muted-foreground shrink-0">Vehicule</dt>
+                  <dd className="max-w-[65%] text-right text-xs leading-relaxed">
+                    <ul className="ml-auto space-y-1">
+                      {form.materialTransportRows
+                        .filter((r) => r.vehicleCode.trim() && r.payloadT !== "")
+                        .map((r, i) => (
+                          <li key={i}>
+                            {VEHICLE_LABELS[r.vehicleCode as VehicleCode]}{" "}
+                            <span className="font-medium">{String(r.payloadT)}t</span>
+                          </li>
+                        ))}
+                    </ul>
+                  </dd>
+                </div>
+              ) : (
+                <div className="flex justify-between gap-4 border-b border-border/50 py-2">
+                  <dt className="text-muted-foreground">Transport vanzator</dt>
+                  <dd className="text-right text-xs text-muted-foreground">
+                    Lasat gol — propunere automata la cumparator
+                  </dd>
+                </div>
+              )}
+              {form.materialMacaraAddon && (
+                <div className="flex justify-between gap-4 border-b border-border/50 py-2">
+                  <dt className="text-muted-foreground">Macara</dt>
+                  <dd className="text-right text-xs font-medium">
+                    Da
+                    {form.materialMacaraFee.trim()
+                      ? ` (+${form.materialMacaraFee} ${form.currency})`
+                      : ""}
+                  </dd>
+                </div>
+              )}
+              <div className="flex justify-between gap-4 border-b border-border/50 py-2">
+                <dt className="text-muted-foreground">Transport / cursa</dt>
+                <dd className="font-medium">
+                  {form.transportFee || "0"} {form.currency}
+                </dd>
+              </div>
+            </>
           )}
           {t === "equipment" && (
             <div className="flex justify-between gap-4 border-b border-border/50 py-2">

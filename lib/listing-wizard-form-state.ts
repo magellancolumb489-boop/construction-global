@@ -1,5 +1,10 @@
 import type { Listing } from "@/lib/api/listings-client"
-import type { ConcreteClassesRpcPayload } from "@/lib/validation/listing.schema"
+import type {
+  ConcreteClassesRpcPayload,
+  MaterialLogisticsRpcPayload,
+} from "@/lib/validation/listing.schema"
+import { materialLogisticsRpcPayloadSchema } from "@/lib/validation/listing.schema"
+import type { VehicleCode } from "@/lib/materials-logistics/catalog"
 import type {
   ConcreteClassCode,
   ConcreteClassSelection,
@@ -13,6 +18,31 @@ export interface ListingConcreteClassRow {
   class_code: string
   consistencies: string[] | null
   consistency_prices?: Record<string, unknown> | null
+}
+
+/** DB row shape for `marketplace_listing_material_spec` (hydrate edit mode). */
+export interface ListingMaterialSpecRow {
+  category_code: string
+  material_code: string
+  pallet_sac_kg: number | null
+  pallet_pieces: number | null
+  pallet_total_kg: number | null
+  max_piece_length_m: number | null
+  macara_addon: boolean
+  macara_fee: number | null
+  allow_non_bulk_transport: boolean
+}
+
+/** DB row shape for `marketplace_listing_material_transport`. */
+export interface ListingMaterialTransportRow {
+  vehicle_code: string
+  payload_t: number
+}
+
+/** One seller-declared vehicle capacity row in the wizard. */
+export interface MaterialTransportRowForm {
+  vehicleCode: string
+  payloadT: number | ""
 }
 
 /** Full client state for the multi-step listing wizard (maps to marketplace_listings columns). */
@@ -50,6 +80,20 @@ export interface WizardFormState {
   serviceArea: string
   /** Seller assumes (insures) delivery. Drives future payout split (see migration comment). */
   sellerAssumesTransport: boolean
+  /** Materials logistics — categorie material (cod stabil RO). */
+  materialCategoryCode: string
+  /** Cod material în cadrul categoriei. */
+  materialCode: string
+  materialPalletSacKg: string
+  materialPalletPieces: string
+  materialPalletTotalKg: string
+  materialMaxPieceLengthM: string
+  materialMacaraAddon: boolean
+  materialMacaraFee: string
+  /** Rule 8: agregate pot permite și alte vehicule decât autobasculanta. */
+  materialAllowNonBulkTransport: boolean
+  /** Capacități transport oferite de vânzător (poate fi gol → platforma propune). */
+  materialTransportRows: MaterialTransportRowForm[]
 }
 
 function isConcreteClassCode(s: string): s is ConcreteClassCode {
@@ -112,6 +156,16 @@ export function emptyWizardState(): WizardFormState {
     equipmentYear: "",
     serviceArea: "",
     sellerAssumesTransport: true,
+    materialCategoryCode: "",
+    materialCode: "",
+    materialPalletSacKg: "",
+    materialPalletPieces: "",
+    materialPalletTotalKg: "",
+    materialMaxPieceLengthM: "",
+    materialMacaraAddon: false,
+    materialMacaraFee: "",
+    materialAllowNonBulkTransport: false,
+    materialTransportRows: [],
   }
 }
 
@@ -119,10 +173,17 @@ export function emptyWizardState(): WizardFormState {
 export function wizardStateFromListing(
   listing: Listing,
   concreteClassRows?: ListingConcreteClassRow[] | null,
+  materialSpec?: ListingMaterialSpecRow | null,
+  materialTransportRows?: ListingMaterialTransportRow[] | null,
 ): WizardFormState {
   const modes = listing.transport_modes ?? []
   const lt = (listing.listing_type as ListingWizardType) || "materials"
   const concreteClasses = concreteSelectionsFromRows(concreteClassRows ?? null)
+  const mtRows: MaterialTransportRowForm[] = (materialTransportRows ?? []).map((r) => ({
+    vehicleCode: r.vehicle_code,
+    payloadT: r.payload_t,
+  }))
+  const spec = materialSpec ?? null
   return {
     listingType: lt,
     title: listing.title ?? "",
@@ -153,6 +214,21 @@ export function wizardStateFromListing(
       listing.equipment_year != null ? String(listing.equipment_year) : "",
     serviceArea: listing.service_area ?? "",
     sellerAssumesTransport: listing.seller_assumes_transport ?? true,
+    materialCategoryCode: spec?.category_code ?? "",
+    materialCode: spec?.material_code ?? "",
+    materialPalletSacKg:
+      spec?.pallet_sac_kg != null ? String(spec.pallet_sac_kg) : "",
+    materialPalletPieces:
+      spec?.pallet_pieces != null ? String(spec.pallet_pieces) : "",
+    materialPalletTotalKg:
+      spec?.pallet_total_kg != null ? String(spec.pallet_total_kg) : "",
+    materialMaxPieceLengthM:
+      spec?.max_piece_length_m != null ? String(spec.max_piece_length_m) : "",
+    materialMacaraAddon: spec?.macara_addon ?? false,
+    materialMacaraFee:
+      spec?.macara_fee != null ? String(spec.macara_fee) : "",
+    materialAllowNonBulkTransport: spec?.allow_non_bulk_transport ?? false,
+    materialTransportRows: mtRows,
   }
 }
 
@@ -181,4 +257,53 @@ export function concreteSelectionsToRpcPayload(
       consistency_prices,
     }
   }) as ConcreteClassesRpcPayload
+}
+
+function optPositiveNumber(raw: string): number | undefined {
+  const t = raw.trim()
+  if (!t) return undefined
+  const n = Number(t)
+  if (!Number.isFinite(n) || n <= 0) return undefined
+  return n
+}
+
+/**
+ * Construiește payload-ul pentru `upsert_listing_material_logistics` din starea wizardului.
+ */
+export function buildMaterialLogisticsRpcPayload(
+  form: WizardFormState,
+): { ok: true; data: MaterialLogisticsRpcPayload } | { ok: false; error: string } {
+  const spec = {
+    category_code: form.materialCategoryCode.trim(),
+    material_code: form.materialCode.trim(),
+    pallet_sac_kg: optPositiveNumber(form.materialPalletSacKg) ?? null,
+    pallet_pieces: optPositiveNumber(form.materialPalletPieces) ?? null,
+    pallet_total_kg: optPositiveNumber(form.materialPalletTotalKg) ?? null,
+    max_piece_length_m: optPositiveNumber(form.materialMaxPieceLengthM) ?? null,
+    macara_addon: form.materialMacaraAddon,
+    macara_fee:
+      form.materialMacaraFee.trim() === ""
+        ? 0
+        : Math.max(0, Number(form.materialMacaraFee) || 0),
+    allow_non_bulk_transport: form.materialAllowNonBulkTransport,
+  }
+
+  const offers = form.materialTransportRows
+    .filter(
+      (r) =>
+        r.vehicleCode.trim() !== "" &&
+        r.payloadT !== "" &&
+        Number.isFinite(Number(r.payloadT)),
+    )
+    .map((r) => ({
+      vehicle_code: r.vehicleCode.trim().toUpperCase() as VehicleCode,
+      payload_t: Number(r.payloadT),
+    }))
+
+  const parsed = materialLogisticsRpcPayloadSchema.safeParse({ spec, offers })
+  if (!parsed.success) {
+    const msg = parsed.error.issues[0]?.message ?? "Date materiale invalide."
+    return { ok: false, error: msg }
+  }
+  return { ok: true, data: parsed.data }
 }

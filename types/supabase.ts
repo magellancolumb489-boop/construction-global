@@ -176,6 +176,88 @@ export type Database = {
           },
         ]
       }
+      marketplace_listing_material_spec: {
+        Row: {
+          allow_non_bulk_transport: boolean
+          category_code: string
+          created_at: string
+          listing_id: number
+          macara_addon: boolean
+          macara_fee: number | null
+          material_code: string
+          max_piece_length_m: number | null
+          pallet_pieces: number | null
+          pallet_sac_kg: number | null
+          pallet_total_kg: number | null
+        }
+        Insert: {
+          allow_non_bulk_transport?: boolean
+          category_code: string
+          created_at?: string
+          listing_id: number
+          macara_addon?: boolean
+          macara_fee?: number | null
+          material_code: string
+          max_piece_length_m?: number | null
+          pallet_pieces?: number | null
+          pallet_sac_kg?: number | null
+          pallet_total_kg?: number | null
+        }
+        Update: {
+          allow_non_bulk_transport?: boolean
+          category_code?: string
+          created_at?: string
+          listing_id?: number
+          macara_addon?: boolean
+          macara_fee?: number | null
+          material_code?: string
+          max_piece_length_m?: number | null
+          pallet_pieces?: number | null
+          pallet_sac_kg?: number | null
+          pallet_total_kg?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_listing_material_spec_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: true
+            referencedRelation: "marketplace_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketplace_listing_material_transport: {
+        Row: {
+          created_at: string
+          id: number
+          listing_id: number
+          payload_t: number
+          vehicle_code: string
+        }
+        Insert: {
+          created_at?: string
+          id?: never
+          listing_id: number
+          payload_t: number
+          vehicle_code: string
+        }
+        Update: {
+          created_at?: string
+          id?: never
+          listing_id?: number
+          payload_t?: number
+          vehicle_code?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_listing_material_transport_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       marketplace_listings: {
         Row: {
           available_qty: number
@@ -856,6 +938,10 @@ export type Database = {
       }
       upsert_listing_concrete_classes: {
         Args: { p_listing_id: number; p_rows: Json }
+        Returns: undefined
+      }
+      upsert_listing_material_logistics: {
+        Args: { p_listing_id: number; p_offers: Json; p_spec: Json }
         Returns: undefined
       }
     }

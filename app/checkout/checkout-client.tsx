@@ -40,6 +40,7 @@ interface CheckoutClientProps {
 function toServerCart(items: ReturnType<typeof useCart>["items"]): CheckoutCartItem[] {
   return items.map((item) => {
     const concrete = item.configureConcreteSelection
+    const mat = item.configureMaterialsSelection
     return {
       listing_id: Number(item.productId),
       qty: item.qty,
@@ -59,6 +60,11 @@ function toServerCart(items: ReturnType<typeof useCart>["items"]): CheckoutCartI
       quote_summary: item.quoteSummary
         ? { ...item.quoteSummary }
         : undefined,
+      materials_vehicle_code: mat?.vehicleCode,
+      materials_payload_t: mat?.payloadT,
+      materials_trips: mat?.trips,
+      materials_macara_addon: mat?.macaraAddon,
+      materials_pallet_count: mat?.palletCount ?? null,
     }
   })
 }

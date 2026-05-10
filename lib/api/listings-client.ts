@@ -5,8 +5,12 @@ import {
   updateListingAction,
   deleteListingAction,
   upsertConcreteClassesAction,
+  upsertMaterialLogisticsAction,
 } from "@/app/sell/listing/actions"
-import type { ConcreteClassesRpcPayload } from "@/lib/validation/listing.schema"
+import type {
+  ConcreteClassesRpcPayload,
+  MaterialLogisticsRpcPayload,
+} from "@/lib/validation/listing.schema"
 
 export type Listing = Tables<"marketplace_listings">
 export type ListingInsert = Omit<TablesInsert<"marketplace_listings">, "id" | "created_at" | "updated_at">
@@ -49,6 +53,14 @@ export async function upsertConcreteClasses(
   rows: ConcreteClassesRpcPayload,
 ): Promise<{ success: boolean; error?: string }> {
   const res = await upsertConcreteClassesAction(listingId, rows)
+  return res.success ? { success: true } : { success: false, error: res.error }
+}
+
+export async function upsertMaterialLogistics(
+  listingId: number,
+  payload: MaterialLogisticsRpcPayload,
+): Promise<{ success: boolean; error?: string }> {
+  const res = await upsertMaterialLogisticsAction(listingId, payload)
   return res.success ? { success: true } : { success: false, error: res.error }
 }
 

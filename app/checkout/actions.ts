@@ -40,6 +40,12 @@ export interface CheckoutCartItem {
   configure_delivery?: Record<string, unknown>
   configure_billing?: Record<string, unknown>
   quote_summary?: Record<string, unknown>
+  /** Materiale cu logistics — validate în place_order când există spec în DB. */
+  materials_vehicle_code?: string
+  materials_payload_t?: number
+  materials_trips?: number
+  materials_macara_addon?: boolean
+  materials_pallet_count?: number | null
 }
 
 // Snapshot the deviz preview / emails consume directly. Mirrors the JSON
@@ -139,6 +145,20 @@ function normalizeCart(items: CheckoutCartItem[]): Json {
     configure_delivery: item.configure_delivery ?? null,
     configure_billing: item.configure_billing ?? null,
     quote_summary: item.quote_summary ?? null,
+    materials_vehicle_code: item.materials_vehicle_code ?? null,
+    materials_payload_t:
+      typeof item.materials_payload_t === "number" && Number.isFinite(item.materials_payload_t)
+        ? item.materials_payload_t
+        : null,
+    materials_trips:
+      typeof item.materials_trips === "number" && Number.isFinite(item.materials_trips)
+        ? Math.round(item.materials_trips)
+        : null,
+    materials_macara_addon: item.materials_macara_addon ?? false,
+    materials_pallet_count:
+      item.materials_pallet_count != null && Number.isFinite(Number(item.materials_pallet_count))
+        ? Number(item.materials_pallet_count)
+        : null,
   })) as Json
 }
 
@@ -282,6 +302,23 @@ function humanizeRpcError(raw: string | undefined | null): string {
   if (/available_qty/i.test(msg)) return "Cantitate peste stocul disponibil pentru un produs din coș."
   if (/no longer active/i.test(msg)) return "Un produs din coș nu mai este activ."
   if (/no published price for concrete/i.test(msg)) return "Preț nepublicat pentru clasa/consistența aleasă."
+  if (/materials cart line missing vehicle/i.test(msg))
+    return "Lipsește vehiculul de transport pentru un material din coș. Reconfigurează comanda."
+  if (/materials cart line missing payload/i.test(msg))
+    return "Lipsește capacitatea vehiculului (tone) pentru un material din coș. Reconfigurează comanda."
+  if (/materials cart line missing trips/i.test(msg))
+    return "Lipsește numărul de curse pentru un material din coș. Reconfigurează comanda."
+  if (/materials trips invalid/i.test(msg)) return "Număr de curse invalid pentru un material din coș."
+  if (/materials trips below minimum/i.test(msg))
+    return "Numărul de curse este sub minimul necesar pentru cantitatea aleasă. Reconfigurează comanda."
+  if (/invalid vehicle payload for listing/i.test(msg))
+    return "Combinația vehicul / tonaj nu este permisă pentru un material din coș."
+  if (/vehicle not offered by seller for listing/i.test(msg))
+    return "Vehiculul ales nu este oferit de vânzător. Reconfigurează comanda."
+  if (/vehicle not allowed for marketplace-assigned listing/i.test(msg))
+    return "Vehiculul ales nu este permis pentru acest anunț. Reconfigurează comanda."
+  if (/macara not available for listing/i.test(msg))
+    return "Opțiunea macara nu este disponibilă pentru un produs din coș."
   if (/listing .* not found/i.test(msg)) return "Un produs din coș nu mai există."
   return msg || "Eroare necunoscută la salvarea comenzii."
 }

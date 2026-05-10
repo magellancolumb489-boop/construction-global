@@ -1,4 +1,5 @@
 import type { PlacedOrder } from "@/app/checkout/actions"
+import { orderLineSnapshotSubline } from "@/lib/checkout/order-line-snapshot-detail"
 
 type Snapshot = Record<string, unknown> | null
 function readString(s: Snapshot, key: string): string {
@@ -291,7 +292,10 @@ export function EmailSellerTemplate({ order }: EmailSellerTemplateProps) {
                         </tr>
                       </thead>
                       <tbody>
-                        {order.lines.map((line) => (
+                        {order.lines.map((line) => {
+                          const snap = (line.snapshot_json ?? {}) as Record<string, unknown>
+                          const subline = orderLineSnapshotSubline(snap)
+                          return (
                           <tr key={line.id}>
                             <td
                               style={{
@@ -301,7 +305,20 @@ export function EmailSellerTemplate({ order }: EmailSellerTemplateProps) {
                                 fontWeight: 600,
                               }}
                             >
-                              {line.title}
+                              <div>{line.title}</div>
+                              {subline && (
+                                <div
+                                  style={{
+                                    marginTop: 4,
+                                    fontWeight: 400,
+                                    fontSize: 10,
+                                    color: palette.muted,
+                                    lineHeight: 1.35,
+                                  }}
+                                >
+                                  {subline}
+                                </div>
+                              )}
                             </td>
                             <td
                               align="right"
@@ -328,7 +345,8 @@ export function EmailSellerTemplate({ order }: EmailSellerTemplateProps) {
                               {formatRO(line.line_total_cents, currency)}
                             </td>
                           </tr>
-                        ))}
+                          )
+                        })}
                       </tbody>
                     </table>
                   </td>

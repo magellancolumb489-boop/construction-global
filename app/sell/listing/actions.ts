@@ -6,6 +6,7 @@ import {
   listingCreateSchema,
   listingUpdateSchema,
   concreteClassesRpcPayloadSchema,
+  materialLogisticsRpcPayloadSchema,
   type ListingCreateInput,
   type ListingUpdateInput,
 } from "@/lib/validation"
@@ -173,6 +174,48 @@ export async function upsertConcreteClassesAction(
     p_rows: parsed.data,
   })
   if (error) return { success: false, error: error.message }
+
+  revalidatePath("/account")
+  revalidatePath("/marketplace")
+  if (existing.slug) revalidatePath(`/products/${existing.slug}-${listingId}`)
+  return { success: true }
+}
+
+/** Replace materials spec + transport rows (seller-only). */
+export async function upsertMaterialLogisticsAction(
+  listingId: number,
+  raw: unknown,
+): Promise<ActionResult> {
+  if (!Number.isFinite(listingId) || listingId <= 0) {
+    return { success: false, error: "ID invalid." }
+  }
+  const parsed = materialLogisticsRpcPayloadSchema.safeParse(raw)
+  if (!parsed.success) {
+    return { success: false, error: firstIssue(parsed.error.issues) }
+  }
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: "Nu esti autentificat." }
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from("marketplace_listings")
+    .select("seller_id, slug")
+    .eq("id", listingId)
+    .maybeSingle()
+  if (fetchErr || !existing) return { success: false, error: "Anunt inexistent." }
+  if (existing.seller_id !== user.id) {
+    return { success: false, error: "Nu esti proprietarul acestui anunt." }
+  }
+
+  const { error } = await supabase.rpc("upsert_listing_material_logistics", {
+    p_listing_id: listingId,
+    p_spec: parsed.data.spec,
+    p_offers: parsed.data.offers,
+  })
+  if (error) return { success: false, error: humanizeDbError(error.message) }
 
   revalidatePath("/account")
   revalidatePath("/marketplace")

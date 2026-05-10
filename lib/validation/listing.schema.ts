@@ -1,8 +1,16 @@
 import { z } from "zod"
 import { CONCRETE_CLASS_CATALOG } from "@/lib/listing-wizard-types"
+import {
+  isValidMaterialPair,
+  isValidPayload,
+  MATERIAL_CATEGORY_CODES,
+  type MaterialCategoryCode,
+  type VehicleCode,
+  VEHICLE_CODES,
+} from "@/lib/materials-logistics/catalog"
 
 // Units / currency accepted by marketplace_listings (must match DB CHECKs)
-export const listingUnitSchema = z.enum(["TON", "KG", "M3", "BUC", "ML"])
+export const listingUnitSchema = z.enum(["TON", "KG", "M3", "BUC", "ML", "CUP", "CAMION"])
 export const currencySchema = z.enum(["RON", "EUR"])
 export const listingTypeSchema = z.enum(["concrete", "materials", "equipment", "services"])
 export const transportModeSchema = z.enum(["CIFA", "POMPA", "VRAC"])
@@ -59,6 +67,57 @@ export const concreteClassesRpcPayloadSchema = z
   .min(1, "Selectati cel putin o clasa de beton.")
 
 export type ConcreteClassesRpcPayload = z.infer<typeof concreteClassesRpcPayloadSchema>
+
+const materialCategoryZ = z.enum(
+  MATERIAL_CATEGORY_CODES as unknown as [MaterialCategoryCode, ...MaterialCategoryCode[]],
+)
+
+const vehicleCodeZ = z.enum(
+  VEHICLE_CODES as unknown as [VehicleCode, ...VehicleCode[]],
+)
+
+/** Single seller transport row for `upsert_listing_material_logistics`. */
+export const materialTransportOfferRowSchema = z
+  .object({
+    vehicle_code: vehicleCodeZ,
+    payload_t: z.number().finite().positive(),
+  })
+  .superRefine((row, ctx) => {
+    if (!isValidPayload(row.vehicle_code, row.payload_t)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Combinație vehicul / capacitate nevalidă.",
+        path: ["payload_t"],
+      })
+    }
+  })
+
+export const materialLogisticsSpecRpcSchema = z.object({
+  category_code: materialCategoryZ,
+  material_code: z.string().trim().min(1),
+  pallet_sac_kg: z.number().finite().positive().nullable().optional(),
+  pallet_pieces: z.number().finite().positive().nullable().optional(),
+  pallet_total_kg: z.number().finite().positive().nullable().optional(),
+  max_piece_length_m: z.number().finite().positive().nullable().optional(),
+  macara_addon: z.boolean(),
+  macara_fee: z.number().finite().nonnegative(),
+  allow_non_bulk_transport: z.boolean(),
+}).superRefine((row, ctx) => {
+  if (!isValidMaterialPair(row.category_code, row.material_code)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Combinație categorie / material nevalidă.",
+      path: ["material_code"],
+    })
+  }
+})
+
+export const materialLogisticsRpcPayloadSchema = z.object({
+  spec: materialLogisticsSpecRpcSchema,
+  offers: z.array(materialTransportOfferRowSchema),
+})
+
+export type MaterialLogisticsRpcPayload = z.infer<typeof materialLogisticsRpcPayloadSchema>
 
 // Slug: URL-safe, 1-80 chars, lowercase, numbers, hyphens
 export const slugSchema = z

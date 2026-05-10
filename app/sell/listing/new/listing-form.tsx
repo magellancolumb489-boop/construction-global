@@ -17,10 +17,12 @@ import {
   deleteListingImage,
   checkSlugAvailable,
   upsertConcreteClasses,
-  type Listing,
+  upsertMaterialLogistics,
   type ListingInsert,
   type ListingUpdate,
 } from "@/lib/api/listings-client"
+import type { ListingWithImages } from "@/lib/api/listings"
+import { embedMaterialSpec, embedMaterialTransport } from "@/lib/listing-material-embed"
 import { createClient } from "@/lib/supabase/client"
 import { ListingWizardStepper } from "@/components/sell/listing-wizard/listing-wizard-stepper"
 import { WizardStepType } from "@/components/sell/listing-wizard/wizard-step-type"
@@ -35,9 +37,21 @@ import {
   wizardStateFromListing,
   transportModesFromFlags,
   concreteSelectionsToRpcPayload,
+  buildMaterialLogisticsRpcPayload,
   type ListingConcreteClassRow,
   type WizardFormState,
 } from "@/lib/listing-wizard-form-state"
+import {
+  isBulkAggregateCategory,
+  isValidMaterialPair,
+  isValidPayload,
+  type MaterialCategoryCode,
+  type VehicleCode,
+} from "@/lib/materials-logistics/catalog"
+import {
+  requiresLengthSection,
+  type MaterialLogisticsSpec,
+} from "@/lib/materials-logistics/engine"
 import {
   CONCRETE_CLASS_CATALOG,
   CONSISTENCY_LABELS,
@@ -58,7 +72,7 @@ interface ExistingImage {
 interface ListingFormProps {
   categories: CategoryOption[]
   editMode?: boolean
-  listing?: Listing
+  listing?: ListingWithImages
   existingImages?: ExistingImage[]
   /** Hydrates concrete class rows in edit mode (from `getListingForEdit` join). */
   existingConcreteClasses?: ListingConcreteClassRow[]
@@ -86,8 +100,86 @@ function hasMeaningfulWizardData(f: WizardFormState): boolean {
       f.minOrderQty.trim() ||
       f.serviceArea.trim() ||
       f.equipmentModel.trim() ||
-      f.concreteClasses.length > 0,
+      f.concreteClasses.length > 0 ||
+      f.materialCategoryCode.trim() ||
+      f.materialCode.trim(),
   )
+}
+
+/** Validari pentru Pasul 2 — materiale cu logistica RO. */
+function validateMaterialsDetails(f: WizardFormState): string | null {
+  if (!f.title.trim()) return "Titlul este obligatoriu."
+  if (!f.price.trim() || Number(f.price) < 0) return "Pretul este obligatoriu."
+  if (!f.availableQty.trim() || Number(f.availableQty) < 0) {
+    return "Cantitatea disponibila este obligatorie."
+  }
+  if (f.transportFee.trim() && Number(f.transportFee) < 0) {
+    return "Costul de transport nu poate fi negativ."
+  }
+  if (!f.materialCategoryCode.trim() || !f.materialCode.trim()) {
+    return "Selectati categoria si materialul."
+  }
+  const cat = f.materialCategoryCode as MaterialCategoryCode
+  if (!isValidMaterialPair(cat, f.materialCode)) {
+    return "Combinație categorie / material invalidă."
+  }
+
+  const previewSpec: MaterialLogisticsSpec = {
+    categoryCode: cat,
+    materialCode: f.materialCode,
+    maxPieceLengthM: f.materialMaxPieceLengthM.trim()
+      ? Number(f.materialMaxPieceLengthM)
+      : null,
+    palletSacKg: f.materialPalletSacKg.trim()
+      ? Number(f.materialPalletSacKg)
+      : null,
+    palletPieces: f.materialPalletPieces.trim()
+      ? Number(f.materialPalletPieces)
+      : null,
+    palletTotalKg: f.materialPalletTotalKg.trim()
+      ? Number(f.materialPalletTotalKg)
+      : null,
+    macaraAddon: f.materialMacaraAddon,
+    macaraFee:
+      f.materialMacaraFee.trim() === ""
+        ? null
+        : Number(f.materialMacaraFee),
+    allowNonBulkTransport: f.materialAllowNonBulkTransport,
+  }
+
+  if (requiresLengthSection(previewSpec)) {
+    const L = Number(f.materialMaxPieceLengthM)
+    if (!Number.isFinite(L) || L <= 0) {
+      return "Introduceti lungimea maxima a piesei (metri)."
+    }
+  }
+
+  const seen = new Set<string>()
+  for (const row of f.materialTransportRows) {
+    const v = row.vehicleCode.trim().toUpperCase()
+    const pRaw = row.payloadT
+    if (!v && (pRaw === "" || pRaw === undefined)) continue
+    if (!v || pRaw === "" || !Number.isFinite(Number(pRaw))) {
+      return "Completati vehicul si capacitatea pentru fiecare rand de transport."
+    }
+    const p = Number(pRaw)
+    if (!isValidPayload(v as VehicleCode, p)) {
+      return "Combinație vehicul / capacitate nepermisa."
+    }
+    const key = `${v}:${p}`
+    if (seen.has(key)) return "Eliminati vehiculele duplicate."
+    seen.add(key)
+    if (isBulkAggregateCategory(cat) && !f.materialAllowNonBulkTransport && v !== "AUTOBASCULANTA") {
+      return "Pentru agregate folositi autobasculanta sau activati «Permit si alte vehicule»."
+    }
+    if (!isBulkAggregateCategory(cat) && v === "AUTOBASCULANTA") {
+      return "Autobasculanta este doar pentru categorii de agregate."
+    }
+  }
+
+  const built = buildMaterialLogisticsRpcPayload(f)
+  if (!built.ok) return built.error
+  return null
 }
 
 /** Validates selected classes, allowed consistencies per class, and positive prices. */
@@ -152,15 +244,7 @@ function validateDetailsStep(t: ListingWizardType, f: WizardFormState): string |
       return null
     }
     case "materials": {
-      if (!f.title.trim()) return "Titlul este obligatoriu."
-      if (!f.price.trim() || Number(f.price) < 0) return "Pretul este obligatoriu."
-      if (!f.availableQty.trim() || Number(f.availableQty) < 0) {
-        return "Cantitatea disponibila este obligatorie."
-      }
-      if (f.transportFee.trim() && Number(f.transportFee) < 0) {
-        return "Costul de transport nu poate fi negativ."
-      }
-      return null
+      return validateMaterialsDetails(f)
     }
     case "equipment": {
       if (!f.title.trim()) return "Titlul este obligatoriu."
@@ -303,7 +387,12 @@ export function ListingForm({
   const [step, setStep] = useState(1)
   const [form, setForm] = useState<WizardFormState>(() =>
     editMode && listing
-      ? wizardStateFromListing(listing, existingConcreteClasses)
+      ? wizardStateFromListing(
+          listing,
+          existingConcreteClasses,
+          embedMaterialSpec(listing.marketplace_listing_material_spec),
+          embedMaterialTransport(listing.marketplace_listing_material_transport),
+        )
       : emptyWizardState(),
   )
 
@@ -440,6 +529,23 @@ export function ListingForm({
             return
           }
         }
+        if (form.listingType === "materials") {
+          const built = buildMaterialLogisticsRpcPayload(form)
+          if (!built.ok) {
+            setError(built.error)
+            setSaving(false)
+            return
+          }
+          const up = await upsertMaterialLogistics(listing.id, built.data)
+          if (!up.success) {
+            setError(
+              up.error ??
+                "Anuntul a fost salvat, dar logistica materiale nu. Reincercati din editare.",
+            )
+            setSaving(false)
+            return
+          }
+        }
         for (const imgId of deletedImageIds) {
           const img = existingImages.find((i) => i.id === imgId)
           if (img) await deleteListingImage(img.id, img.storage_path)
@@ -472,6 +578,23 @@ export function ListingForm({
           setError(
             up.error ??
               "Anuntul a fost creat, dar clasele de beton nu. Completati din editare.",
+          )
+          setSaving(false)
+          return
+        }
+      }
+      if (form.listingType === "materials") {
+        const built = buildMaterialLogisticsRpcPayload(form)
+        if (!built.ok) {
+          setError(built.error)
+          setSaving(false)
+          return
+        }
+        const up = await upsertMaterialLogistics(res.data.id, built.data)
+        if (!up.success) {
+          setError(
+            up.error ??
+              "Anuntul a fost creat, dar logistica materiale nu. Completati din editare.",
           )
           setSaving(false)
           return
