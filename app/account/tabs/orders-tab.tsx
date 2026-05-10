@@ -10,8 +10,9 @@ import { EmptyState } from "@/components/shared/empty-state"
 import { getOrders } from "@/lib/api/orders"
 import type { OrderSummary } from "@/types/domain"
 
-// Lifted from the old monolith verbatim. When the real order pipeline lands
-// this tab will read from a server helper and not need useEffect.
+// getOrders is a server action ('use server' file) — calling it from the
+// client returns a Promise just like the old fetch helper, so the existing
+// effect shape still works.
 export function OrdersTab() {
   const [orders, setOrders] = useState<OrderSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -23,7 +24,9 @@ export function OrdersTab() {
       setOrders(o)
       setLoading(false)
     })
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   return (
@@ -38,9 +41,9 @@ export function OrdersTab() {
       ) : orders.length === 0 ? (
         <EmptyState
           icon={ShoppingBag}
-          title="Nicio comanda"
-          description="Nu aveti comenzi inca."
-          actionLabel="Viziteaza magazinul"
+          title="Nicio comandă"
+          description="Nu ai comenzi încă."
+          actionLabel="Vizitează magazinul"
           actionHref="/marketplace"
         />
       ) : (
@@ -52,16 +55,25 @@ export function OrdersTab() {
             >
               <div className="min-w-0 flex-1">
                 <p className="mb-1 text-sm font-semibold text-foreground">
-                  Comanda <span className="font-mono text-xs text-muted-foreground">#{o.id}</span>
+                  Comanda{" "}
+                  <span className="font-mono text-xs text-muted-foreground">
+                    #{o.id.slice(0, 8)}…
+                  </span>
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusBadge status={o.status} />
                   <StatusBadge status={o.paymentStatus} />
-                  <span className="text-xs text-muted-foreground">{o.itemCount} produse</span>
+                  <span className="text-xs text-muted-foreground">
+                    {o.itemCount} produse
+                  </span>
                 </div>
               </div>
               <div className="flex items-center gap-3 sm:shrink-0">
-                <MoneyDisplay amount={o.total} currency={o.currency} className="text-base font-bold text-foreground" />
+                <MoneyDisplay
+                  amount={o.total}
+                  currency={o.currency}
+                  className="text-base font-bold text-foreground"
+                />
                 <Button variant="outline" size="sm" className="rounded-xl" asChild>
                   <Link href={`/account/orders/${o.id}`}>
                     <Eye className="mr-1 h-3.5 w-3.5" /> Detalii

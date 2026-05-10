@@ -356,6 +356,201 @@ export type Database = {
           },
         ]
       }
+      // NOTE: orders / order_lines / payments and the place_order RPC below
+      // were hand-extended from migration 20260512120000_orders_phase2.sql.
+      // Re-run `npm run gen:types` once the Supabase CLI is linked to replace
+      // these blocks with the generated equivalents.
+      order_lines: {
+        Row: {
+          created_at: string
+          id: number
+          line_total_cents: number
+          listing_id: number | null
+          order_id: string
+          qty: number
+          snapshot_json: Json | null
+          title: string
+          transport_cents: number
+          unit: string
+          unit_price_cents: number
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          line_total_cents: number
+          listing_id?: number | null
+          order_id: string
+          qty: number
+          snapshot_json?: Json | null
+          title: string
+          transport_cents?: number
+          unit: string
+          unit_price_cents: number
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          line_total_cents?: number
+          listing_id?: number | null
+          order_id?: string
+          qty?: number
+          snapshot_json?: Json | null
+          title?: string
+          transport_cents?: number
+          unit?: string
+          unit_price_cents?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_lines_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_lines_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      orders: {
+        Row: {
+          billing_json: Json | null
+          buyer_id: string
+          buyer_snapshot: Json | null
+          created_at: string
+          currency: string
+          deviz_number: string | null
+          id: string
+          idempotency_key: string | null
+          notes: string | null
+          order_number: string | null
+          payment_provider: string
+          payment_status: string
+          seller_id: string
+          seller_snapshot: Json | null
+          shipping_json: Json | null
+          status: string
+          stripe_payment_intent_id: string | null
+          stripe_session_id: string | null
+          subtotal_cents: number
+          total_cents: number
+          transport_cents: number
+          updated_at: string
+          vat_cents: number
+        }
+        Insert: {
+          billing_json?: Json | null
+          buyer_id: string
+          buyer_snapshot?: Json | null
+          created_at?: string
+          currency?: string
+          deviz_number?: string | null
+          id?: string
+          idempotency_key?: string | null
+          notes?: string | null
+          order_number?: string | null
+          payment_provider?: string
+          payment_status?: string
+          seller_id: string
+          seller_snapshot?: Json | null
+          shipping_json?: Json | null
+          status?: string
+          stripe_payment_intent_id?: string | null
+          stripe_session_id?: string | null
+          subtotal_cents?: number
+          total_cents?: number
+          transport_cents?: number
+          updated_at?: string
+          vat_cents?: number
+        }
+        Update: {
+          billing_json?: Json | null
+          buyer_id?: string
+          buyer_snapshot?: Json | null
+          created_at?: string
+          currency?: string
+          deviz_number?: string | null
+          id?: string
+          idempotency_key?: string | null
+          notes?: string | null
+          order_number?: string | null
+          payment_provider?: string
+          payment_status?: string
+          seller_id?: string
+          seller_snapshot?: Json | null
+          shipping_json?: Json | null
+          status?: string
+          stripe_payment_intent_id?: string | null
+          stripe_session_id?: string | null
+          subtotal_cents?: number
+          total_cents?: number
+          transport_cents?: number
+          updated_at?: string
+          vat_cents?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orders_buyer_id_fkey"
+            columns: ["buyer_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_seller_id_fkey"
+            columns: ["seller_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payments: {
+        Row: {
+          amount_cents: number
+          created_at: string
+          id: string
+          order_id: string
+          provider: string
+          provider_event_id: string | null
+          raw_json: Json | null
+          status: string
+        }
+        Insert: {
+          amount_cents: number
+          created_at?: string
+          id?: string
+          order_id: string
+          provider: string
+          provider_event_id?: string | null
+          raw_json?: Json | null
+          status: string
+        }
+        Update: {
+          amount_cents?: number
+          created_at?: string
+          id?: string
+          order_id?: string
+          provider?: string
+          provider_event_id?: string | null
+          raw_json?: Json | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payments_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_path: string | null
@@ -644,6 +839,17 @@ export type Database = {
         }
       }
       is_admin: { Args: never; Returns: boolean }
+      // NOTE: hand-extended for migration 20260512120000_orders_phase2.sql.
+      place_order: {
+        Args: {
+          p_cart: Json
+          p_billing: Json
+          p_shipping: Json
+          p_notes: string | null
+          p_idempotency_key: string | null
+        }
+        Returns: Json
+      }
       set_user_role: {
         Args: { p_role: string; p_target: string }
         Returns: Json

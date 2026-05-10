@@ -56,6 +56,21 @@ function firstIssue(issues: { message: string }[] | undefined): string {
   return issues?.[0]?.message ?? "Date invalide"
 }
 
+// Translate raw PostgREST / Postgres errors that point at a stale schema cache
+// (e.g. PGRST204 "Could not find the 'X' column ... in the schema cache") into
+// a clean Romanian message instead of leaking the raw string into the UI toast.
+function humanizeDbError(message: string | undefined | null): string {
+  const msg = message ?? ""
+  if (
+    msg.includes("schema cache") ||
+    msg.includes("PGRST204") ||
+    /Could not find the '[^']+' column/i.test(msg)
+  ) {
+    return "Schema bazei de date este invechita. Ruleaza migratia recenta pe Supabase si reincearca."
+  }
+  return msg || "Eroare necunoscuta la baza de date."
+}
+
 export async function createListingAction(
   raw: ListingCreateInput
 ): Promise<ActionResult<Listing>> {
@@ -76,7 +91,7 @@ export async function createListingAction(
     .select()
     .single()
 
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: humanizeDbError(error.message) }
   revalidatePath("/account")
   revalidatePath("/marketplace")
   return { success: true, data: data as Listing }
@@ -117,7 +132,7 @@ export async function updateListingAction(
     .update(parsed.data)
     .eq("id", id)
 
-  if (error) return { success: false, error: error.message }
+  if (error) return { success: false, error: humanizeDbError(error.message) }
   revalidatePath("/account")
   revalidatePath("/marketplace")
   if (existing.slug) revalidatePath(`/products/${existing.slug}-${id}`)
