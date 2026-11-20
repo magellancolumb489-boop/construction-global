@@ -309,6 +309,31 @@ End-to-end results on live, rolled back:
 - Addresses, policies and supplier settings forms still show a single banner error (now in Romanian), not per-field errors.
 - Reviews, threads and login_events RLS (S7–S9) are unchanged.
 
+## 3g. Marketplace UX and listing rules (2026-11-20, fifth pass)
+
+- **Listing rules** (`lib/listings/rules.ts`, enforced in the wizard and again in the server actions on the merged row):
+  - Title 10–120 characters, not all caps. Description at least 40 characters. Location and quantity required; minimum order no larger than stock.
+  - **No phone, email, URL or messaging apps in the title or description.** Deals must stay on the platform.
+  - Equipment: condition (fixed list), make/model and year required, at least 3 photos.
+  - Services: service area required.
+  - Price plausibility for aggregates, concrete and bags: an unusual price warns while typing; more than 5× off the usual range is blocked. This catches unit mistakes like "criblură 20 RON/kg".
+  - A per-type rules panel is shown before the seller types.
+  - Turning a listing off is never blocked.
+- **Cards:**
+  - Type badge, "Nou" badge, delivery mode, image count, and a spec line per type (concrete classes and modes, material, model / year / condition, service area).
+  - Location, seller, minimum order; "de la" lowest class price for concrete, with "+ TVA".
+  - The call to action depends on whether the listing is configurable.
+- **PDP:**
+  - Title block with badges, a "de la" price, and the minimum order (the quantity starts at it and can't go below).
+  - Technical details per type, concrete class × consistency price table, delivery section.
+  - Seller card: company and legal form, active listing count, "all listings from this seller" (`/marketplace?vanzator=`). No contact data is shown.
+  - Similar offers widen from same material → same category → same type and exclude the same seller; plus "more from this seller".
+- **Cross-promotion:**
+  - Auctions teaser on the marketplace and PDP; buy-now teaser on the auctions list and auction pages.
+  - Auctions are still mock data (S14); the teaser says "previzualizare".
+- Verified on live data: all 10 cards render with seller names, all PDP sections render, the concrete price table renders, both teasers render, and the seller filter works.
+- **Open:** existing listings that break the new rules stay visible but must be fixed on their next edit. Q28: hide them until fixed?
+
 ## 4. Prioritized fix plan
 
 Each step is one migration or one focused commit. Steps 1–6 need no client decision.

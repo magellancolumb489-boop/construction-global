@@ -123,6 +123,22 @@ export interface ProductListItem {
   sellerPrice?: number
   /** Commission rate applied to `price` (0.10 = 10%). */
   commissionRate?: number
+  // ---- card details (list query) ----
+  sellerId?: string
+  sellerName?: string | null
+  imageCount?: number
+  minOrderQty?: number | null
+  /** Concrete: class codes offered and the lowest buyer price over all consistencies. */
+  concreteClassCodes?: string[]
+  priceFrom?: number | null
+  transportModes?: string[] | null
+  equipmentCondition?: string | null
+  equipmentYear?: number | null
+  equipmentModel?: string | null
+  serviceArea?: string | null
+  materialCategoryCode?: string | null
+  materialCode?: string | null
+  createdAt?: string
 }
 
 export interface ProductDetail extends ProductListItem {

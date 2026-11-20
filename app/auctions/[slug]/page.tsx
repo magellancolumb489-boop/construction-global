@@ -8,6 +8,8 @@ import {
 } from "@/lib/auction-shell/mock-data"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
 import { AuctionDetailClient } from "./auction-detail-client"
+import { getProductListItems } from "@/lib/api/listings"
+import { MarketplaceTeaser } from "@/components/products/cross-promo"
 
 function extractSlug(param: string): string {
   const lastDash = param.lastIndexOf("-")
@@ -48,8 +50,15 @@ export default async function AuctionDetailPage({
     currentUserId = user.id
   }
 
+  // Equipment lots point to equipment offers; everything else to the newest materials.
+  const buyNow = await getProductListItems({
+    listingTypes: /utilaj|excavator|buldo|macara|echipament/i.test(auction.title) ? ["equipment"] : ["materials", "concrete"],
+    sort: "newest",
+    limit: 4,
+  })
+
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6 sm:py-8">
+    <div className="mx-auto max-w-7xl space-y-12 px-4 py-6 sm:py-8">
       <Breadcrumbs
         items={[
           { label: "Licitatii", href: "/auctions" },
@@ -65,6 +74,7 @@ export default async function AuctionDetailPage({
         lotId={Number(auction.id)}
         relatedAuctions={relatedAuctions}
       />
+      <MarketplaceTeaser items={buyNow.items} />
     </div>
   )
 }

@@ -1,5 +1,7 @@
 "use client"
 
+import { checkPrice, listingCoreIssues, MIN_IMAGES, priceMessage, priceRange, type ListingType } from "@/lib/listings/rules"
+import { ListingGuide } from "@/components/sell/listing-wizard/listing-guide"
 import { useState, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Loader2, Trash2 } from "lucide-react"
@@ -221,7 +223,40 @@ function validateStep(step: number, form: WizardFormState): string | null {
   return null
 }
 
+/** Shared rules (lib/listings/rules.ts); same checks run again in the server actions. */
+function validateCommonRules(t: ListingWizardType, f: WizardFormState): string | null {
+  const num = (v: string) => (v.trim() === "" ? null : Number(v))
+  const issue = listingCoreIssues({
+    listing_type: t as ListingType,
+    title: f.title,
+    description: f.description,
+    price: t === "concrete" ? 1 : Number(f.price),
+    unit: f.unit,
+    available_qty: Number(f.availableQty),
+    min_order_qty: num(f.minOrderQty),
+    location: f.location || f.pickupAddress,
+    equipment_condition: f.equipmentCondition,
+    equipment_model: f.equipmentModel,
+    equipment_year: num(f.equipmentYear),
+    service_area: f.serviceArea,
+  })[0]
+  if (issue) return issue.message
+  if (t !== "concrete") {
+    const check = checkPrice(
+      Number(f.price),
+      priceRange(t as ListingType, f.unit, f.materialCategoryCode || null, f.materialCode || null),
+    )
+    if (check.status === "block") return priceMessage(check, f.unit)
+  }
+  return null
+}
+
 function validateDetailsStep(t: ListingWizardType, f: WizardFormState): string | null {
+  const typeErr = validateTypeDetails(t, f)
+  return typeErr ?? validateCommonRules(t, f)
+}
+
+function validateTypeDetails(t: ListingWizardType, f: WizardFormState): string | null {
   switch (t) {
     case "concrete": {
       if (!f.title.trim()) return "Titlul este obligatoriu."
@@ -464,6 +499,14 @@ export function ListingForm({
 
   function handleNext() {
     setError(null)
+    if (step === 3 && form.listingType) {
+      const need = MIN_IMAGES[form.listingType as ListingType]
+      const have = remainingExisting.length + newPreviews.length
+      if (have < need) {
+        setError(`Adaugă cel puțin ${need} ${need === 1 ? "fotografie" : "fotografii"} (ai ${have}).`)
+        return
+      }
+    }
     const msg = validateStep(step, form)
     if (msg) {
       setError(msg)
@@ -674,6 +717,20 @@ export function ListingForm({
         />
       )}
 
+      {step === 2 && form.listingType && <ListingGuide type={form.listingType as ListingType} />}
+      {step === 2 && form.listingType && form.listingType !== "concrete" && (() => {
+        const msg = priceMessage(
+          checkPrice(Number(form.price), priceRange(form.listingType as ListingType, form.unit, form.materialCategoryCode || null, form.materialCode || null)),
+          form.unit,
+        )
+        return msg ? <p className="rounded-xl bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">{msg}</p> : null
+      })()}
+      {step === 3 && form.listingType && (
+        <p className="text-sm text-muted-foreground">
+          Minim {MIN_IMAGES[form.listingType as ListingType]} fotografii clare, reale (nu din internet). Prima devine
+          imaginea principală.
+        </p>
+      )}
       {step === 3 && (
         <WizardStepImages
           listingType={form.listingType}

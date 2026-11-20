@@ -55,6 +55,10 @@ export interface ListingsFilter {
   transport?: "seller" | "platform"
   /** Free-text match on listing location (city / county). */
   location?: string
+  /** Only this seller's listings ("Alte anunțuri ale vânzătorului"). */
+  sellerId?: string
+  /** Leave these listing ids out (the one being viewed). */
+  excludeIds?: number[]
 }
 
 /** Escape LIKE wildcards so user text matches literally. */
@@ -87,6 +91,7 @@ export function toProductListItem(
   firstImagePath?: string,
   materialLabel?: string | null,
   pricing?: PlatformPricing,
+  extras?: Partial<ProductListItem>,
 ): ProductListItem {
   // Buyer-facing price includes the platform commission; seller price kept apart.
   const rate = pricing?.commissionRate ?? 0
@@ -106,6 +111,15 @@ export function toProductListItem(
     location: listing.location ?? null,
     sellerAssumesTransport: listing.seller_assumes_transport ?? true,
     materialLabel: materialLabel ?? null,
+    sellerId: listing.seller_id,
+    minOrderQty: listing.min_order_qty ?? null,
+    transportModes: listing.transport_modes ?? null,
+    equipmentCondition: listing.equipment_condition ?? null,
+    equipmentYear: listing.equipment_year ?? null,
+    equipmentModel: listing.equipment_model ?? null,
+    serviceArea: listing.service_area ?? null,
+    createdAt: listing.created_at,
+    ...extras,
   }
 }
 
@@ -279,10 +293,14 @@ export async function getProductListItems(filters: ListingsFilter = {}): Promise
   // Fetch listings with their first image, category name and material in one query
   let query = supabase
     .from("marketplace_listings")
-    .select(`*, marketplace_listing_images(storage_path, display_order), categories(name), ${specEmbed}`, {
-      count: "exact",
-    })
+    .select(
+      `*, marketplace_listing_images(storage_path, display_order), categories(name), ${specEmbed},
+       marketplace_listing_concrete_classes(class_code, consistency_prices),
+       seller:public_profiles!marketplace_listings_seller_id_fkey(display_name, company_name)`,
+      { count: "exact" },
+    )
     .eq("is_active", true)
+    .is("deleted_at", null)
 
   if (filters.listingTypes?.length) {
     query = query.in("listing_type", filters.listingTypes)
@@ -295,6 +313,12 @@ export async function getProductListItems(filters: ListingsFilter = {}): Promise
   }
   if (filters.transport) {
     query = query.eq("seller_assumes_transport", filters.transport === "seller")
+  }
+  if (filters.sellerId) {
+    query = query.eq("seller_id", filters.sellerId)
+  }
+  if (filters.excludeIds?.length) {
+    query = query.not("id", "in", `(${filters.excludeIds.map(Number).filter(Number.isFinite).join(",")})`)
   }
   if (filters.location?.trim()) {
     query = query.ilike("location", `%${likeLiteral(filters.location.trim())}%`)
@@ -356,7 +380,23 @@ export async function getProductListItems(filters: ListingsFilter = {}): Promise
       | null
       | undefined
     const materialLabel = spec ? (MATERIAL_LABELS[spec.material_code] ?? spec.material_code) : null
-    return toProductListItem(row as Listing, catName, firstPath, materialLabel, pricing)
+    // Concrete: price per class/consistency lives on child rows; show "de la" the lowest.
+    const classes = (row.marketplace_listing_concrete_classes ?? []) as {
+      class_code: string
+      consistency_prices: Record<string, number | string> | null
+    }[]
+    const classPrices = classes
+      .flatMap((c) => Object.values(c.consistency_prices ?? {}).map(Number))
+      .filter((n) => Number.isFinite(n) && n > 0)
+    const sellerRaw = Array.isArray(row.seller) ? row.seller[0] : row.seller
+    return toProductListItem(row as Listing, catName, firstPath, materialLabel, pricing, {
+      imageCount: images.length,
+      sellerName: sellerRaw?.company_name?.trim() || sellerRaw?.display_name?.trim() || null,
+      concreteClassCodes: classes.map((c) => c.class_code),
+      priceFrom: classPrices.length ? buyerPrice(Math.min(...classPrices), pricing.commissionRate) : null,
+      materialCategoryCode: spec?.category_code ?? null,
+      materialCode: spec?.material_code ?? null,
+    })
   })
 
   return { items, total: count ?? 0 }
@@ -501,4 +541,42 @@ export async function getProductDetailFromListing(slug: string): Promise<Product
   }
 
   return toProductDetail(row as ListingWithImages, catName, seller, await getPlatformPricing())
+}
+
+/**
+ * "Oferte similare": widen step by step until `limit` is reached:
+ * same material -> same material category -> same listing type. Excludes the
+ * listing itself and the seller's own other listings (shown separately).
+ */
+export async function getSimilarListings(
+  product: { id: string; sellerId: string; listingKind: string; materialLogistics?: { categoryCode: string; materialCode: string } | null },
+  limit = 4,
+): Promise<ProductListItem[]> {
+  const exclude = [Number(product.id)]
+  const out: ProductListItem[] = []
+  const add = (items: ProductListItem[]) => {
+    for (const it of items) {
+      if (out.length >= limit) break
+      if (it.sellerId === product.sellerId || out.some((o) => o.id === it.id)) continue
+      out.push(it)
+    }
+  }
+  const ml = product.materialLogistics
+  const steps: ListingsFilter[] = []
+  if (ml) {
+    steps.push({ materialCodes: [ml.materialCode], materialCategories: [ml.categoryCode] })
+    steps.push({ materialCategories: [ml.categoryCode] })
+  }
+  steps.push({ listingTypes: [product.listingKind] })
+  for (const f of steps) {
+    if (out.length >= limit) break
+    const { items } = await getProductListItems({ ...f, excludeIds: exclude, limit: limit * 2, sort: "newest" })
+    add(items)
+  }
+  return out
+}
+
+/** Other active listings from the same seller. */
+export async function getSellerOtherListings(sellerId: string, excludeId: string, limit = 4): Promise<{ items: ProductListItem[]; total: number }> {
+  return getProductListItems({ sellerId, excludeIds: [Number(excludeId)], limit, sort: "newest" })
 }

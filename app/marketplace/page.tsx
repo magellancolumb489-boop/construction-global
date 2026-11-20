@@ -4,6 +4,8 @@ import { MarketplaceContent } from "./marketplace-content"
 import { getProductListItems, type ListingsFilter } from "@/lib/api/listings"
 import { getCategories } from "@/lib/api/categories"
 import { MATERIAL_CATEGORY_CODES } from "@/lib/materials-logistics/catalog"
+import Link from "next/link"
+import { AuctionsTeaser } from "@/components/products/cross-promo"
 
 export const metadata = {
   title: "Magazin Materiale - ConstructionHub Romania",
@@ -57,6 +59,7 @@ function parseFilters(sp: SearchParams): { filter: ListingsFilter; page: number 
       minPrice: num(sp.min),
       maxPrice: num(sp.max),
       categoryId: categoryId && Number.isInteger(categoryId) ? categoryId : undefined,
+      sellerId: /^[0-9a-f-]{36}$/i.test(one(sp.vanzator)) ? one(sp.vanzator) : undefined,
       limit: PAGE_SIZE,
       offset: (page - 1) * PAGE_SIZE,
     },
@@ -93,6 +96,15 @@ export default async function MarketplacePage({
           Materiale de constructii de calitate, livrate la santier
         </p>
       </div>
+      {filter.sellerId && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-border/50 bg-card px-4 py-3 text-sm">
+          <span>
+            Anunțurile vânzătorului
+            {listingsData.items[0]?.sellerName ? <strong> {listingsData.items[0].sellerName}</strong> : null}
+          </span>
+          <Link href="/marketplace" className="ml-auto text-xs text-muted-foreground underline">Toate anunțurile</Link>
+        </div>
+      )}
       <MarketplaceContent
         products={listingsData.items}
         total={listingsData.total}
@@ -100,6 +112,9 @@ export default async function MarketplacePage({
         pageSize={PAGE_SIZE}
         categories={categoryOptions}
       />
+      <div className="mt-12">
+        <AuctionsTeaser />
+      </div>
     </div>
   )
 }

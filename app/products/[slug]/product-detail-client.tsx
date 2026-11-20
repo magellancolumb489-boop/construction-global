@@ -1,9 +1,9 @@
 "use client"
 
-import { useId, useState } from "react"
+import { useId, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Package, Edit, Trash2, Loader2, User as UserIcon, Shield, ShoppingCart } from "lucide-react"
+import { ArrowRight, Package, Edit, Trash2, Loader2, User as UserIcon, Shield, ShoppingCart, MapPin } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -15,18 +15,75 @@ import {
 } from "@/components/ui/alert-dialog"
 import { GalleryCarousel } from "@/components/shared/gallery-carousel"
 import { MoneyDisplay } from "@/components/shared/money-display"
-import { ProductCard } from "@/components/shared/product-card"
 import { saveConfigureDraft } from "@/lib/configure-draft"
 import { useCart } from "@/lib/cart-context"
 import { deleteListing } from "@/lib/api/listings-client"
 import { useToast } from "@/hooks/use-toast"
-import type { ProductDetail, ProductListItem } from "@/types/domain"
+import type { ProductDetail } from "@/types/domain"
 
 interface ProductDetailClientProps {
   product: ProductDetail
   isOwner?: boolean
   listingId?: number | null
-  relatedProducts?: ProductListItem[]
+  /** Server-rendered technical details (left column, under the description). */
+  specsSlot?: ReactNode
+  /** Server-rendered seller card (right column, under the purchase panel). */
+  sellerSlot?: ReactNode
+}
+
+const KIND_LABEL: Record<string, string> = { concrete: "Beton", materials: "Materiale", equipment: "Utilaje", services: "Servicii" }
+
+/** Concrete is priced per class/consistency: show the lowest as "de la". */
+function headlinePrice(product: ProductDetail): { amount: number; from: boolean } {
+  if (product.listingKind === "concrete") {
+    const prices = product.concreteClasses
+      .flatMap((c) => Object.values(c.consistencyPrices).map(Number))
+      .filter((n) => Number.isFinite(n) && n > 0)
+    if (prices.length) return { amount: Math.min(...prices), from: true }
+  }
+  return { amount: product.price, from: false }
+}
+
+function PriceHeadline({ product, size }: { product: ProductDetail; size: "md" | "lg" }) {
+  const hp = headlinePrice(product)
+  return (
+    <div className="mb-4 rounded-xl bg-primary/10 px-4 py-3 ring-1 ring-primary/20">
+      <div className="flex items-baseline gap-2">
+        {hp.from && <span className="text-sm text-muted-foreground">de la</span>}
+        <MoneyDisplay
+          amount={hp.amount}
+          currency={product.currency}
+          className={`${size === "lg" ? "text-3xl" : "text-2xl"} font-extrabold text-primary`}
+        />
+        <span className="text-sm text-muted-foreground">/ {product.unit} + TVA</span>
+      </div>
+      {product.minOrderQty != null && product.minOrderQty > 0 && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Comandă minimă: {product.minOrderQty.toLocaleString("ro-RO")} {product.unit}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function TitleBlock({ product }: { product: ProductDetail }) {
+  return (
+    <div className="mb-4">
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        <Badge className="rounded-lg">{KIND_LABEL[product.listingKind] ?? product.listingKind}</Badge>
+        {product.materialLabel && <Badge variant="secondary" className="rounded-lg">{product.materialLabel}</Badge>}
+        <Badge variant="outline" className="rounded-lg">
+          {product.sellerAssumesTransport ? "Livrare de la vânzător" : "Transport prin platformă"}
+        </Badge>
+      </div>
+      <h1 className="text-xl font-extrabold text-foreground sm:text-2xl">{product.name}</h1>
+      {product.location && (
+        <p className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
+          <MapPin className="h-3.5 w-3.5" /> {product.location}
+        </p>
+      )}
+    </div>
+  )
 }
 
 /** Stock / availability line — wording differs for equipment and services. */
@@ -79,17 +136,18 @@ function ProductPurchaseBlock({
   const allowQty =
     product.listingKind === "materials" && !needsMaterialsConfigurator
   const maxQ = Math.max(1, product.availableQty)
+  const minQ = Math.min(maxQ, product.minOrderQty && product.minOrderQty > 0 ? product.minOrderQty : 1)
 
   function handleContinueToConfigure() {
     const q = isConcrete
       ? 1
-      : Math.min(Math.max(1, qty), maxQ)
+      : Math.min(Math.max(minQ, qty), maxQ)
     saveConfigureDraft(product, q)
     router.push("/cart/configurare")
   }
 
   function handleAddToCart() {
-    const q = allowQty ? Math.min(Math.max(1, qty), maxQ) : 1
+    const q = allowQty ? Math.min(Math.max(minQ, qty), maxQ) : 1
     const res = addItem({
       productId: product.id,
       sellerId: product.sellerId,
@@ -135,12 +193,11 @@ function ProductPurchaseBlock({
               <Input
                 id={qtyFieldId}
                 type="number"
-                min={1}
+                min={minQ}
                 max={maxQ}
                 value={qty}
-                onChange={(e) =>
-                  onQtyChange(Math.max(1, Math.min(maxQ, Number(e.target.value) || 1)))
-                }
+                onChange={(e) => onQtyChange(Math.min(maxQ, Number(e.target.value) || 0))}
+                onBlur={() => onQtyChange(Math.min(maxQ, Math.max(minQ, qty)))}
                 className="mt-1 h-11 rounded-xl"
               />
             </div>
@@ -187,12 +244,11 @@ function ProductPurchaseBlock({
             <Input
               id={qtyFieldId}
               type="number"
-              min={1}
+              min={minQ}
               max={maxQ}
               value={qty}
-              onChange={(e) =>
-                onQtyChange(Math.max(1, Math.min(maxQ, Number(e.target.value) || 1)))
-              }
+              onChange={(e) => onQtyChange(Math.min(maxQ, Number(e.target.value) || 0))}
+              onBlur={() => onQtyChange(Math.min(maxQ, Math.max(minQ, qty)))}
               className="mt-1 h-11 rounded-xl"
             />
           </div>
@@ -238,12 +294,15 @@ export function ProductDetailClient({
   product,
   isOwner = false,
   listingId,
-  relatedProducts = [],
+  specsSlot,
+  sellerSlot,
 }: ProductDetailClientProps) {
   const router = useRouter()
   const [deleting, setDeleting] = useState(false)
   /** Shared between mobile and desktop purchase panels (only one visible per breakpoint). */
-  const [purchaseQty, setPurchaseQty] = useState(1)
+  const [purchaseQty, setPurchaseQty] = useState(
+    product.minOrderQty && product.minOrderQty > 0 ? product.minOrderQty : 1,
+  )
 
   async function handleDelete() {
     if (!listingId) return
@@ -300,15 +359,8 @@ export function ProductDetailClient({
           <GalleryCarousel images={product.images} />
 
           <div className="rounded-2xl border border-border/50 bg-card p-5 lg:hidden">
-            <h2 className="mb-3 text-xl font-extrabold text-foreground">{product.name}</h2>
-            <div className="mb-4 flex items-baseline gap-2 rounded-xl bg-primary/10 px-4 py-3 ring-1 ring-primary/20">
-              <MoneyDisplay
-                amount={product.price}
-                currency={product.currency}
-                className="text-2xl font-extrabold text-primary"
-              />
-              <span className="text-sm text-muted-foreground">/ {product.unit}</span>
-            </div>
+            <TitleBlock product={product} />
+            <PriceHeadline product={product} size="md" />
             <div className="mb-4 flex items-center gap-2">
               <Package className="h-4 w-4 text-muted-foreground" />
               <StockBadge product={product} />
@@ -324,22 +376,20 @@ export function ProductDetailClient({
 
           <div className="rounded-2xl border border-border/50 bg-card p-5 sm:p-6">
             <h2 className="mb-3 text-lg font-bold text-foreground">Descriere</h2>
-            <p className="whitespace-pre-line leading-relaxed text-muted-foreground">{product.description}</p>
+            <p className="whitespace-pre-line leading-relaxed text-muted-foreground">
+              {product.description || "Vânzătorul nu a adăugat o descriere."}
+            </p>
           </div>
+
+          {specsSlot}
+
+          <div className="lg:hidden">{sellerSlot}</div>
         </div>
 
         <div className="hidden space-y-4 lg:block lg:sticky lg:top-20 lg:self-start">
           <div className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm">
-            <h2 className="mb-4 text-xl font-extrabold text-foreground">{product.name}</h2>
-
-            <div className="mb-4 flex items-baseline gap-2 rounded-xl bg-primary/10 px-4 py-3 ring-1 ring-primary/20">
-              <MoneyDisplay
-                amount={product.price}
-                currency={product.currency}
-                className="text-3xl font-extrabold text-primary"
-              />
-              <span className="text-base text-muted-foreground">/ {product.unit}</span>
-            </div>
+            <TitleBlock product={product} />
+            <PriceHeadline product={product} size="lg" />
 
             <div className="mb-4 flex items-center gap-2">
               <Package className="h-4 w-4 text-muted-foreground" />
@@ -356,27 +406,13 @@ export function ProductDetailClient({
 
             <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
               <Shield className="h-3.5 w-3.5 text-emerald-600" />
-              Tranzactie sigura si garantata
+              Plată prin platformă, proformă pentru fiecare comandă
             </div>
           </div>
+          {sellerSlot}
         </div>
       </div>
 
-      {relatedProducts.length > 0 && (
-        <section className="border-t border-border/50 pt-8">
-          <div className="mb-5 flex items-center justify-between">
-            <h2 className="text-xl font-bold text-foreground">Produse Similare</h2>
-            <Button variant="outline" size="sm" asChild className="rounded-xl">
-              <Link href="/marketplace">Vezi toate</Link>
-            </Button>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {relatedProducts.slice(0, 4).map((p) => (
-              <ProductCard key={p.id} product={p} />
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   )
 }

@@ -1,5 +1,6 @@
 "use server"
 
+import { checkPrice, listingCoreIssues, priceMessage, priceRange, type ListingCore } from "@/lib/listings/rules"
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import {
@@ -80,6 +81,25 @@ function humanizeDbError(message: string | undefined | null): string {
   return msg || "Eroare necunoscuta la baza de date."
 }
 
+/** Map a listing row (or row + changes) to the shared content rules input. */
+function toCore(row: Record<string, unknown>): ListingCore {
+  const num = (v: unknown) => (v == null || v === "" ? null : Number(v))
+  return {
+    listing_type: (row.listing_type as ListingCore["listing_type"]) ?? "materials",
+    title: String(row.title ?? ""),
+    description: (row.description as string | null) ?? null,
+    price: Number(row.price ?? 0),
+    unit: String(row.unit ?? ""),
+    available_qty: Number(row.available_qty ?? 0),
+    min_order_qty: num(row.min_order_qty),
+    location: (row.location as string | null) || (row.pickup_address as string | null) || null,
+    equipment_condition: (row.equipment_condition as string | null) ?? null,
+    equipment_model: (row.equipment_model as string | null) ?? null,
+    equipment_year: num(row.equipment_year),
+    service_area: (row.service_area as string | null) ?? null,
+  }
+}
+
 export async function createListingAction(
   raw: ListingCreateInput
 ): Promise<ActionResult<Listing>> {
@@ -93,6 +113,8 @@ export async function createListingAction(
   if (!parsed.success) {
     return { success: false, error: firstIssue(parsed.error.issues) }
   }
+  const ruleIssue = listingCoreIssues(toCore(parsed.data))[0]
+  if (ruleIssue) return { success: false, error: ruleIssue.message }
 
   let { data, error } = await supabase
     .from("marketplace_listings")
@@ -138,12 +160,20 @@ export async function updateListingAction(
   // here avoids surfacing a raw Postgres message in the UI.
   const { data: existing, error: fetchErr } = await supabase
     .from("marketplace_listings")
-    .select("seller_id, slug")
+    .select("*")
     .eq("id", id)
     .maybeSingle()
   if (fetchErr || !existing) return { success: false, error: "Anunt inexistent." }
   if (existing.seller_id !== user.id) {
     return { success: false, error: "Nu esti proprietarul acestui anunt." }
+  }
+
+  // Rules run on the row as it will be after the update, so partial updates
+  // cannot slip past them. Turning a listing off is always allowed.
+  const onlyDeactivating = Object.keys(parsed.data).length === 1 && parsed.data.is_active === false
+  if (!onlyDeactivating) {
+    const ruleIssue = listingCoreIssues(toCore({ ...existing, ...parsed.data }))[0]
+    if (ruleIssue) return { success: false, error: ruleIssue.message }
   }
 
   const { error } = await supabase
@@ -179,12 +209,21 @@ export async function upsertConcreteClassesAction(
 
   const { data: existing, error: fetchErr } = await supabase
     .from("marketplace_listings")
-    .select("seller_id, slug")
+    .select("seller_id, slug, unit")
     .eq("id", listingId)
     .maybeSingle()
   if (fetchErr || !existing) return { success: false, error: "Anunt inexistent." }
   if (existing.seller_id !== user.id) {
     return { success: false, error: "Nu esti proprietarul acestui anunt." }
+  }
+  const concreteRange = priceRange("concrete", existing.unit)
+  for (const row of parsed.data) {
+    for (const [cons, price] of Object.entries(row.consistency_prices ?? {})) {
+      const check = checkPrice(Number(price), concreteRange)
+      if (check.status === "block") {
+        return { success: false, error: `${row.class_code} ${cons}: ${priceMessage(check, existing.unit)}` }
+      }
+    }
   }
 
   const { error } = await supabase.rpc("upsert_listing_concrete_classes", {
@@ -220,7 +259,7 @@ export async function upsertMaterialLogisticsAction(
 
   const { data: existing, error: fetchErr } = await supabase
     .from("marketplace_listings")
-    .select("seller_id, slug, unit")
+    .select("seller_id, slug, unit, price")
     .eq("id", listingId)
     .maybeSingle()
   if (fetchErr || !existing) return { success: false, error: "Anunt inexistent." }
@@ -230,6 +269,11 @@ export async function upsertMaterialLogisticsAction(
   // Unit comes from the DB row, not the client, so the rule can't be bypassed.
   const issue = materialListingIssue(existing.unit, parsed.data)
   if (issue) return { success: false, error: issue }
+  const priceCheck = checkPrice(
+    Number(existing.price),
+    priceRange("materials", existing.unit, parsed.data.spec.category_code, parsed.data.spec.material_code),
+  )
+  if (priceCheck.status === "block") return { success: false, error: priceMessage(priceCheck, existing.unit)! }
 
   const { error } = await supabase.rpc("upsert_listing_material_logistics", {
     p_listing_id: listingId,

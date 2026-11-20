@@ -8,6 +8,8 @@ import {
   filterMockAuctions,
 } from "@/lib/auction-shell/mock-data"
 import { getCategories } from "@/lib/api/categories"
+import { getProductListItems } from "@/lib/api/listings"
+import { MarketplaceTeaser } from "@/components/products/cross-promo"
 
 export const metadata = {
   title: "Licitatii - ConstructionHub Romania",
@@ -31,6 +33,8 @@ export default async function AuctionsPage() {
     ),
     getCategories(),
   ])
+  // Buy-now alternatives from the live marketplace.
+  const buyNow = await getProductListItems({ sort: "newest", limit: 4 })
 
   const categoryOptions = categories.map((c) => ({ id: c.id, slug: c.slug, name: c.name }))
 
@@ -54,6 +58,9 @@ export default async function AuctionsPage() {
           categories={categoryOptions}
         />
       </Suspense>
+      <div className="mt-12">
+        <MarketplaceTeaser items={buyNow.items} />
+      </div>
     </div>
   )
 }

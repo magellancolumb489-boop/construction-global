@@ -6,6 +6,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import type { WizardFormState } from "@/lib/listing-wizard-form-state"
+import { EQUIPMENT_CONDITIONS, EQUIPMENT_CONDITION_LABELS } from "@/lib/listings/rules"
 
 const CURRENCIES = [
   { value: "RON", label: "RON" },
@@ -61,15 +62,22 @@ export function WizardStepDetailsEquipment({ form, setForm, categories }: Props)
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
-              <Label>Stare</Label>
-              <Input
-                value={form.equipmentCondition}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, equipmentCondition: e.target.value }))
-                }
-                placeholder="ex: Foarte bun"
-                className="mt-1"
-              />
+              <Label>Stare *</Label>
+              <Select
+                value={form.equipmentCondition || undefined}
+                onValueChange={(v) => setForm((f) => ({ ...f, equipmentCondition: v }))}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Alege starea" />
+                </SelectTrigger>
+                <SelectContent>
+                  {EQUIPMENT_CONDITIONS.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {EQUIPMENT_CONDITION_LABELS[c]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label>Model</Label>
