@@ -243,12 +243,39 @@ export async function deleteListingAction(id: number): Promise<ActionResult> {
     return { success: false, error: "Nu esti proprietarul acestui anunt." }
   }
 
+  // Collect image files before the row (and its image rows) cascade away.
+  // Files live under {seller_id}/{listing_id}/; listing that folder also
+  // catches files whose DB row was lost earlier (orphans).
+  const folder = `${user.id}/${id}`
+  const { data: imageRows } = await supabase
+    .from("marketplace_listing_images")
+    .select("storage_path")
+    .eq("listing_id", id)
+  const { data: folderFiles } = await supabase.storage
+    .from("listing-images")
+    .list(folder, { limit: 1000 })
+  const paths = new Set<string>([
+    ...(imageRows ?? []).map((r) => r.storage_path),
+    ...(folderFiles ?? []).map((f) => `${folder}/${f.name}`),
+  ])
+
   const { error } = await supabase
     .from("marketplace_listings")
     .delete()
     .eq("id", id)
 
   if (error) return { success: false, error: error.message }
+
+  // Listing is gone; a storage failure must not undo that. Log and move on.
+  if (paths.size > 0) {
+    const { error: storageError } = await supabase.storage
+      .from("listing-images")
+      .remove([...paths])
+    if (storageError) {
+      console.warn(`[listings] image cleanup failed for listing ${id}:`, storageError.message)
+    }
+  }
+
   revalidatePath("/account")
   revalidatePath("/marketplace")
   return { success: true }

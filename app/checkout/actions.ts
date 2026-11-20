@@ -1,5 +1,6 @@
 "use server"
 
+import { after } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { getPaymentsMode } from "@/lib/payments/mode"
 import {
@@ -34,8 +35,8 @@ export interface CheckoutCartItem {
   qty: number
   concrete_class_code?: string
   concrete_consistency?: string
-  // unit_price_cents is ONLY honored as a fallback inside the RPC for concrete
-  // when no published row exists; non-concrete listings always use DB price.
+  // Ignored by place_order since v2 (20261120162110): every price comes from
+  // the DB. Kept optional only so older clients don't break.
   unit_price_cents?: number
   configure_delivery?: Record<string, unknown>
   configure_billing?: Record<string, unknown>
@@ -94,6 +95,15 @@ function generateIdempotencyKey(): string {
   return globalThis.crypto?.randomUUID?.() ?? `ck-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+// The browser generates the key once per cart and resends it on every retry,
+// so a timeout + retry replays the first order instead of creating a second.
+// A server-generated key per call cannot do that.
+const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{16,100}$/
+
+function resolveIdempotencyKey(clientKey: string | undefined | null): string {
+  return clientKey && IDEMPOTENCY_KEY_RE.test(clientKey) ? clientKey : generateIdempotencyKey()
+}
+
 function buildBillingJson(input: CheckoutFormInput): Json {
   return {
     name: input.name,
@@ -120,12 +130,18 @@ function buildShippingJson(input: CheckoutFormInput): Json {
   }
 }
 
-/** Non-blocking Resend send after checkout — failures never fail the order. */
+/**
+ * Non-blocking Resend send after checkout — failures never fail the order.
+ * `after()` keeps the serverless function alive until the send finishes;
+ * a bare un-awaited promise can be frozen once the response is sent.
+ */
 function scheduleOrderConfirmationEmails(order: PlacedOrder): void {
   if (!process.env.RESEND_API_KEY?.trim()) return
-  void sendOrderEmails(order).catch((err) => {
-    if (process.env.NODE_ENV !== "production") {
-      console.warn("[checkout] order confirmation emails failed:", err)
+  after(async () => {
+    try {
+      await sendOrderEmails(order)
+    } catch (err) {
+      console.warn("[checkout] order confirmation emails failed:", err instanceof Error ? err.message : err)
     }
   })
 }
@@ -165,6 +181,7 @@ function normalizeCart(items: CheckoutCartItem[]): Json {
 export async function placeOrderAction(
   form: CheckoutFormInput,
   cart: CheckoutCartItem[],
+  idempotencyKey?: string,
 ): Promise<PlaceOrderResult> {
   if (!cart || cart.length === 0) {
     return { success: false, error: "Coșul este gol." }
@@ -183,14 +200,12 @@ export async function placeOrderAction(
     return { success: false, error: "Nu ești autentificat. Reconectează-te și încearcă din nou." }
   }
 
-  const idempotencyKey = generateIdempotencyKey()
-
   const { data, error } = await supabase.rpc("place_order", {
     p_cart: normalizeCart(cart),
     p_billing: buildBillingJson(form),
     p_shipping: buildShippingJson(form),
     p_notes: form.notes ?? null,
-    p_idempotency_key: idempotencyKey,
+    p_idempotency_key: resolveIdempotencyKey(idempotencyKey),
   })
 
   if (error) {
@@ -302,6 +317,7 @@ function humanizeRpcError(raw: string | undefined | null): string {
   if (/available_qty/i.test(msg)) return "Cantitate peste stocul disponibil pentru un produs din coș."
   if (/no longer active/i.test(msg)) return "Un produs din coș nu mai este activ."
   if (/no published price for concrete/i.test(msg)) return "Preț nepublicat pentru clasa/consistența aleasă."
+  if (/duplicate listing/i.test(msg)) return "Același produs apare de două ori în coș. Golește coșul și adaugă-l din nou."
   if (/materials cart line missing vehicle/i.test(msg))
     return "Lipsește vehiculul de transport pentru un material din coș. Reconfigurează comanda."
   if (/materials cart line missing payload/i.test(msg))

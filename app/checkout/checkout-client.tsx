@@ -46,11 +46,7 @@ function toServerCart(items: ReturnType<typeof useCart>["items"]): CheckoutCartI
       qty: item.qty,
       concrete_class_code: concrete?.classCode,
       concrete_consistency: concrete?.consistency,
-      // unit_price_cents only matters for concrete fallback inside the RPC.
-      unit_price_cents:
-        concrete?.unitPrice != null
-          ? Math.round(concrete.unitPrice * 100)
-          : undefined,
+      // No unit price: place_order reads it from the seller's published table.
       configure_delivery: item.configureDelivery
         ? { ...item.configureDelivery }
         : undefined,
@@ -67,6 +63,38 @@ function toServerCart(items: ReturnType<typeof useCart>["items"]): CheckoutCartI
       materials_pallet_count: mat?.palletCount ?? null,
     }
   })
+}
+
+// One idempotency key per cart contents. Kept in sessionStorage so a retry
+// after a timeout, a double click, or a refresh during processing replays the
+// same order on the server. A changed cart gets a new key.
+const CHECKOUT_KEY_STORAGE = "constructionhub_checkout_key"
+
+function checkoutKeyFor(cart: CheckoutCartItem[]): string {
+  const fingerprint = JSON.stringify(cart)
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(CHECKOUT_KEY_STORAGE) ?? "null") as
+      | { fingerprint: string; key: string }
+      | null
+    if (saved?.fingerprint === fingerprint && saved.key) return saved.key
+  } catch {
+    // storage unavailable or corrupt: fall through to a fresh key
+  }
+  const key = crypto.randomUUID()
+  try {
+    sessionStorage.setItem(CHECKOUT_KEY_STORAGE, JSON.stringify({ fingerprint, key }))
+  } catch {
+    // private mode: the key still covers retries within this page
+  }
+  return key
+}
+
+function forgetCheckoutKey(): void {
+  try {
+    sessionStorage.removeItem(CHECKOUT_KEY_STORAGE)
+  } catch {
+    // ignore
+  }
 }
 
 export function CheckoutClient({ userEmail }: CheckoutClientProps) {
@@ -154,7 +182,7 @@ export function CheckoutClient({ userEmail }: CheckoutClientProps) {
     }
     const cartPayload = toServerCart(items)
 
-    const result = await placeOrderAction(formInput, cartPayload)
+    const result = await placeOrderAction(formInput, cartPayload, checkoutKeyFor(cartPayload))
 
     if (!result.success) {
       // Show the failed phase as the visible blocker so the user understands
@@ -177,6 +205,7 @@ export function CheckoutClient({ userEmail }: CheckoutClientProps) {
     await tick(160)
 
     setOrder(result.order)
+    forgetCheckoutKey()
     clearCart()
     setStep("deviz")
 

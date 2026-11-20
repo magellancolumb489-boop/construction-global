@@ -94,7 +94,11 @@ export async function uploadListingImage(
       display_order: displayOrder,
     })
 
-  if (insertError) return { success: false, error: insertError.message }
+  if (insertError) {
+    // No DB row points at the file; remove it so it doesn't become an orphan.
+    await supabase.storage.from("listing-images").remove([storagePath])
+    return { success: false, error: insertError.message }
+  }
 
   return { success: true, path: storagePath }
 }
@@ -105,6 +109,8 @@ export async function deleteListingImage(
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = createClient()
 
+  // Needs the owner SELECT policy on storage.objects (migration
+  // 20261120161902); without it remove() silently matches nothing.
   const { error: storageError } = await supabase.storage
     .from("listing-images")
     .remove([storagePath])
