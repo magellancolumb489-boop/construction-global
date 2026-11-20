@@ -1,332 +1,184 @@
 "use client"
 
-// `@react-pdf/renderer` is a heavy client-only bundle. The Document is
-// exported alone here; consumers wrap PDFDownloadLink with next/dynamic to
-// keep the SSR bundle thin. See deviz-pdf-download.tsx for the lazy client.
+// `@react-pdf/renderer` is a heavy client-only bundle; consumers load it via
+// deviz-pdf-download.tsx (next/dynamic). Layout follows a Romanian
+// "factură proformă": series/number, dates, Furnizor / Cumpărător blocks with
+// CUI, Reg. Com., address, IBAN, a numbered table with U.M., cantitate, preț
+// unitar fără TVA, valoare, TVA, then totals and mentions.
 
-import {
-  Document,
-  Page,
-  Text,
-  View,
-  StyleSheet,
-} from "@react-pdf/renderer"
+import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer"
 import type { PlacedOrder } from "@/app/checkout/actions"
-import { orderLineSnapshotSubline } from "@/lib/checkout/order-line-snapshot-detail"
+import { buildProforma, type ProformaCopy, type ProformaParty } from "@/lib/checkout/proforma"
+import { PDF_FONT_FAMILY, registerPdfFonts } from "@/lib/checkout/pdf-fonts"
 
-type Snapshot = Record<string, unknown> | null
-function readString(s: Snapshot, key: string): string {
-  if (!s) return ""
-  const v = s[key]
-  return typeof v === "string" ? v : ""
-}
-function readObject(s: Snapshot, key: string): Snapshot {
-  if (!s) return null
-  const v = s[key]
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as Snapshot) : null
-}
-function fiscalAddressLine(addr: Snapshot): string {
-  if (!addr) return ""
-  const parts = [
-    readString(addr, "address_line1"),
-    readString(addr, "city"),
-    readString(addr, "county"),
-    readString(addr, "country"),
-  ].filter(Boolean)
-  return parts.join(", ")
-}
+registerPdfFonts()
 
-function formatRO(amountCents: number, currency: string): string {
-  const value = amountCents / 100
+function money(cents: number, currency: string): string {
   return (
-    value.toLocaleString("ro-RO", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }) +
-    " " +
-    currency
+    (cents / 100).toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + currency
   )
 }
 
-// Stylesheet kept in one place; @react-pdf/renderer doesn't accept Tailwind
-// so we mirror the visual rhythm of the HTML deviz manually.
-const styles = StyleSheet.create({
-  page: {
-    paddingTop: 36,
-    paddingBottom: 36,
-    paddingHorizontal: 40,
-    fontSize: 10,
-    color: "#0f172a",
-    fontFamily: "Helvetica",
-  },
-  headerRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
-    paddingBottom: 12,
-    marginBottom: 14,
-  },
-  eyebrow: { fontSize: 8, color: "#64748b", letterSpacing: 1.5, marginBottom: 4 },
-  title: { fontSize: 18, fontWeight: 700, color: "#0f172a" },
-  subTitle: { fontSize: 9, color: "#475569", marginTop: 2 },
-  small: { fontSize: 9, color: "#475569" },
-  smallStrong: { fontSize: 10, color: "#1e293b", fontWeight: 700 },
-  twoCol: { flexDirection: "row", gap: 24, marginBottom: 18 },
-  col: { flex: 1 },
-  sectionLabel: {
-    fontSize: 8,
-    color: "#64748b",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: 4,
-  },
-  partyName: { fontSize: 11, fontWeight: 700, color: "#0f172a", marginBottom: 2 },
-  partyMeta: { fontSize: 9, color: "#334155", marginTop: 1 },
-  table: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 4, overflow: "hidden" },
-  thead: {
-    flexDirection: "row",
-    backgroundColor: "#f8fafc",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
-    paddingHorizontal: 6,
-    paddingVertical: 6,
-  },
-  th: { fontSize: 8, color: "#64748b", textTransform: "uppercase", letterSpacing: 1 },
-  thProduct: { flex: 1 },
-  thQty: { width: 40, textAlign: "right" },
-  thUnit: { width: 40 },
-  thUnitPrice: { width: 80, textAlign: "right" },
-  thSubtotal: { width: 80, textAlign: "right" },
-  tbodyRow: {
-    flexDirection: "row",
-    borderTopWidth: 1,
-    borderTopColor: "#f1f5f9",
-    paddingHorizontal: 6,
-    paddingVertical: 6,
-  },
-  tdProduct: { flex: 1, paddingRight: 4 },
-  tdQty: { width: 40, textAlign: "right" },
-  tdUnit: { width: 40 },
-  tdUnitPrice: { width: 80, textAlign: "right" },
-  tdSubtotal: { width: 80, textAlign: "right", fontWeight: 700 },
-  totalsBlock: { marginTop: 16, alignSelf: "flex-end", width: 220 },
-  totalRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 },
-  totalRowGrand: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    borderTopWidth: 1,
-    borderTopColor: "#e2e8f0",
-    paddingTop: 6,
-    marginTop: 4,
-  },
-  grandLabel: { fontSize: 11, fontWeight: 700, color: "#0f172a" },
-  grandValue: { fontSize: 12, fontWeight: 700, color: "#0f172a" },
-  footer: {
-    marginTop: 24,
-    borderTopWidth: 1,
-    borderTopColor: "#e2e8f0",
-    paddingTop: 10,
-    fontSize: 8,
-    color: "#64748b",
-  },
+function qty(n: number): string {
+  return n.toLocaleString("ro-RO", { maximumFractionDigits: 3 })
+}
+
+function date(iso: string | null): string {
+  if (!iso) return "-"
+  return new Date(iso).toLocaleDateString("ro-RO", { year: "numeric", month: "2-digit", day: "2-digit" })
+}
+
+const s = StyleSheet.create({
+  page: { paddingVertical: 32, paddingHorizontal: 36, fontSize: 9, color: "#0f172a", fontFamily: PDF_FONT_FAMILY },
+  head: { flexDirection: "row", justifyContent: "space-between", marginBottom: 14 },
+  title: { fontSize: 16, fontWeight: 700 },
+  sub: { fontSize: 9, color: "#475569", marginTop: 2 },
+  meta: { fontSize: 9, textAlign: "right" },
+  metaStrong: { fontSize: 10, fontWeight: 700, textAlign: "right" },
+  parties: { flexDirection: "row", gap: 16, marginBottom: 14 },
+  party: { flex: 1, borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 3, padding: 8 },
+  partyLabel: { fontSize: 7, color: "#64748b", letterSpacing: 1, marginBottom: 3 },
+  partyName: { fontSize: 10, fontWeight: 700, marginBottom: 2 },
+  partyRow: { fontSize: 8.5, color: "#334155", marginTop: 1 },
+  table: { borderWidth: 1, borderColor: "#cbd5e1" },
+  tr: { flexDirection: "row", borderTopWidth: 1, borderTopColor: "#e2e8f0" },
+  th: { flexDirection: "row", backgroundColor: "#f1f5f9" },
+  c: { paddingVertical: 4, paddingHorizontal: 4 },
+  cNo: { width: 22, textAlign: "center" },
+  cDesc: { flex: 1 },
+  cUm: { width: 34, textAlign: "center" },
+  cQty: { width: 46, textAlign: "right" },
+  cPrice: { width: 70, textAlign: "right" },
+  cVal: { width: 74, textAlign: "right" },
+  cVat: { width: 64, textAlign: "right" },
+  thText: { fontSize: 7, fontWeight: 700, color: "#334155" },
+  subline: { fontSize: 7, color: "#64748b", marginTop: 1 },
+  totals: { marginTop: 10, alignSelf: "flex-end", width: 250 },
+  totRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 },
+  grand: { flexDirection: "row", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: "#0f172a", paddingTop: 4, marginTop: 3 },
+  grandText: { fontSize: 11, fontWeight: 700 },
+  summary: { marginTop: 12, borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 3, padding: 8 },
+  warn: { marginTop: 10, padding: 6, backgroundColor: "#fef3c7", fontSize: 8, color: "#92400e" },
+  notes: { marginTop: 14, borderTopWidth: 1, borderTopColor: "#e2e8f0", paddingTop: 6, fontSize: 7.5, color: "#475569" },
+  sign: { flexDirection: "row", justifyContent: "space-between", marginTop: 28, fontSize: 8, color: "#475569" },
 })
+
+function Party({ label, p }: { label: string; p: ProformaParty }) {
+  return (
+    <View style={s.party}>
+      <Text style={s.partyLabel}>{label}</Text>
+      <Text style={s.partyName}>{p.name}</Text>
+      {p.cui && <Text style={s.partyRow}>CUI / CIF: {p.cui}</Text>}
+      {p.regCom && <Text style={s.partyRow}>Nr. Reg. Com.: {p.regCom}</Text>}
+      {p.vatId && <Text style={s.partyRow}>Cod TVA: {p.vatId}</Text>}
+      {p.address && <Text style={s.partyRow}>Sediu: {p.address}</Text>}
+      {p.iban && <Text style={s.partyRow}>IBAN: {p.iban}</Text>}
+      {p.bank && <Text style={s.partyRow}>Banca: {p.bank}</Text>}
+      {p.email && <Text style={s.partyRow}>Email: {p.email}</Text>}
+      {p.phone && <Text style={s.partyRow}>Tel: {p.phone}</Text>}
+    </View>
+  )
+}
 
 export interface DevizPdfDocumentProps {
   order: PlacedOrder
+  copy?: ProformaCopy
 }
 
-export function DevizPdfDocument({ order }: DevizPdfDocumentProps) {
-  const currency = order.currency || "RON"
-  const supplier = order.seller_snapshot
-  const supplierFiscal = readObject(supplier, "fiscal_address")
-  const buyer = order.buyer_snapshot
-  const buyerFormBilling = readObject(buyer, "form_billing")
-  const buyerFormShipping = readObject(buyer, "form_shipping")
-  const created = new Date(order.created_at)
-
+export function DevizPdfDocument({ order, copy = "buyer" }: DevizPdfDocumentProps) {
+  const d = buildProforma(order, copy)
+  const cur = d.currency
   return (
-    <Document
-      title={`Deviz ${order.deviz_number ?? order.order_number ?? ""}`}
-      author="ConstructionHub Romania"
-    >
-      <Page size="A4" style={styles.page}>
-        {/* Header */}
-        <View style={styles.headerRow}>
+    <Document title={`Proforma ${d.number}`} author={d.issuer.name}>
+      <Page size="A4" style={s.page}>
+        <View style={s.head}>
           <View>
-            <Text style={styles.eyebrow}>DEVIZ COMANDĂ</Text>
-            <Text style={styles.title}>{order.deviz_number ?? "DEV-—"}</Text>
-            <Text style={styles.subTitle}>
-              Comandă {order.order_number ?? "ORD-—"}
-            </Text>
+            <Text style={s.title}>{d.title}</Text>
+            <Text style={s.sub}>{d.subtitle}</Text>
           </View>
           <View>
-            <Text style={[styles.small, { textAlign: "right" }]}>Emis la</Text>
-            <Text style={[styles.smallStrong, { textAlign: "right" }]}>
-              {created.toLocaleDateString("ro-RO", {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
-            </Text>
-            <Text style={[styles.small, { textAlign: "right" }]}>
-              {created.toLocaleTimeString("ro-RO", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </Text>
+            <Text style={s.metaStrong}>Nr. {d.number}</Text>
+            <Text style={s.meta}>Data emiterii: {date(d.issueDate)}</Text>
+            <Text style={s.meta}>Scadență: {date(d.dueDate)}</Text>
+            <Text style={s.meta}>Comanda: {d.orderNumber}</Text>
           </View>
         </View>
 
-        {/* Parties */}
-        <View style={styles.twoCol}>
-          <View style={styles.col}>
-            <Text style={styles.sectionLabel}>FURNIZOR</Text>
-            <Text style={styles.partyName}>
-              {readString(supplier, "company_name") ||
-                readString(supplier, "display_name") ||
-                "Furnizor"}
-            </Text>
-            {readString(supplier, "entity_type") !== "" && (
-              <Text style={styles.partyMeta}>
-                {readString(supplier, "entity_type")}
-              </Text>
-            )}
-            {readString(supplier, "vat_id") !== "" && (
-              <Text style={styles.partyMeta}>
-                CUI / VAT: {readString(supplier, "vat_id")}
-              </Text>
-            )}
-            {readString(supplier, "reg_com") !== "" && (
-              <Text style={styles.partyMeta}>
-                Reg. com.: {readString(supplier, "reg_com")}
-              </Text>
-            )}
-            {fiscalAddressLine(supplierFiscal) !== "" && (
-              <Text style={styles.partyMeta}>
-                {fiscalAddressLine(supplierFiscal)}
-              </Text>
-            )}
-            {readString(supplier, "phone") !== "" && (
-              <Text style={styles.partyMeta}>
-                Tel: {readString(supplier, "phone")}
-              </Text>
-            )}
-          </View>
-
-          <View style={styles.col}>
-            <Text style={styles.sectionLabel}>CLIENT</Text>
-            <Text style={styles.partyName}>
-              {readString(buyerFormBilling, "company_name") ||
-                readString(buyerFormBilling, "name") ||
-                readString(buyer, "company_name") ||
-                readString(buyer, "display_name") ||
-                "Client"}
-            </Text>
-            {readString(buyerFormBilling, "vat_number") !== "" && (
-              <Text style={styles.partyMeta}>
-                CUI / CIF: {readString(buyerFormBilling, "vat_number")}
-              </Text>
-            )}
-            {readString(buyerFormShipping, "address_line1") !== "" && (
-              <Text style={styles.partyMeta}>
-                {readString(buyerFormShipping, "address_line1")}
-              </Text>
-            )}
-            {(readString(buyerFormShipping, "city") !== "" ||
-              readString(buyerFormShipping, "county") !== "") && (
-              <Text style={styles.partyMeta}>
-                {[
-                  readString(buyerFormShipping, "city"),
-                  readString(buyerFormShipping, "county"),
-                  readString(buyerFormShipping, "country"),
-                ]
-                  .filter(Boolean)
-                  .join(", ")}
-              </Text>
-            )}
-            {readString(buyerFormBilling, "email") !== "" && (
-              <Text style={styles.partyMeta}>
-                Email: {readString(buyerFormBilling, "email")}
-              </Text>
-            )}
-            {readString(buyerFormBilling, "phone") !== "" && (
-              <Text style={styles.partyMeta}>
-                Tel: {readString(buyerFormBilling, "phone")}
-              </Text>
-            )}
-          </View>
+        <View style={s.parties}>
+          <Party label="FURNIZOR" p={d.issuer} />
+          <Party label="CUMPĂRĂTOR" p={d.customer} />
         </View>
 
-        {/* Lines table */}
-        <View style={styles.table}>
-          <View style={styles.thead}>
-            <Text style={[styles.th, styles.thProduct]}>Produs</Text>
-            <Text style={[styles.th, styles.thQty]}>Cant.</Text>
-            <Text style={[styles.th, styles.thUnit]}>U.M.</Text>
-            <Text style={[styles.th, styles.thUnitPrice]}>Preț unitar</Text>
-            <Text style={[styles.th, styles.thSubtotal]}>Subtotal</Text>
+        <View style={s.table}>
+          <View style={s.th}>
+            <Text style={[s.c, s.cNo, s.thText]}>Nr.</Text>
+            <Text style={[s.c, s.cDesc, s.thText]}>Denumire produs / serviciu</Text>
+            <Text style={[s.c, s.cUm, s.thText]}>U.M.</Text>
+            <Text style={[s.c, s.cQty, s.thText]}>Cant.</Text>
+            <Text style={[s.c, s.cPrice, s.thText]}>Preț unitar fără TVA</Text>
+            <Text style={[s.c, s.cVal, s.thText]}>Valoare</Text>
+            <Text style={[s.c, s.cVat, s.thText]}>TVA {d.vatRatePct}%</Text>
           </View>
-          {order.lines.map((line) => {
-            const snap = (line.snapshot_json ?? {}) as Record<string, unknown>
-            const subline = orderLineSnapshotSubline(snap)
-            return (
-              <View key={line.id} style={styles.tbodyRow} wrap={false}>
-                <View style={styles.tdProduct}>
-                  <Text>{line.title}</Text>
-                  {subline !== null && subline !== "" && (
-                    <Text style={{ fontSize: 8, color: "#64748b", marginTop: 2 }}>
-                      {subline}
-                    </Text>
-                  )}
-                </View>
-                <Text style={styles.tdQty}>
-                  {Number(line.qty).toLocaleString("ro-RO")}
-                </Text>
-                <Text style={styles.tdUnit}>{line.unit}</Text>
-                <Text style={styles.tdUnitPrice}>
-                  {formatRO(line.unit_price_cents, currency)}
-                </Text>
-                <Text style={styles.tdSubtotal}>
-                  {formatRO(line.unit_price_cents * Number(line.qty), currency)}
-                </Text>
+          {d.lines.map((l) => (
+            <View key={l.no} style={s.tr} wrap={false}>
+              <Text style={[s.c, s.cNo]}>{l.no}</Text>
+              <View style={[s.c, s.cDesc]}>
+                <Text>{l.description}</Text>
+                {l.subline ? <Text style={s.subline}>{l.subline}</Text> : null}
               </View>
-            )
-          })}
+              <Text style={[s.c, s.cUm]}>{l.unit}</Text>
+              <Text style={[s.c, s.cQty]}>{qty(l.qty)}</Text>
+              <Text style={[s.c, s.cPrice]}>{money(l.unitPriceCents, cur)}</Text>
+              <Text style={[s.c, s.cVal]}>{money(l.valueCents, cur)}</Text>
+              <Text style={[s.c, s.cVat]}>{money(l.vatCents, cur)}</Text>
+            </View>
+          ))}
         </View>
 
-        {/* Totals */}
-        <View style={styles.totalsBlock}>
-          <View style={styles.totalRow}>
-            <Text>Subtotal</Text>
-            <Text>{formatRO(order.subtotal_cents, currency)}</Text>
+        <View style={s.totals}>
+          <View style={s.totRow}>
+            <Text>Total fără TVA</Text>
+            <Text>{money(d.netCents, cur)}</Text>
           </View>
-          <View style={styles.totalRow}>
-            <Text>Transport</Text>
-            <Text>{formatRO(order.transport_cents, currency)}</Text>
+          <View style={s.totRow}>
+            <Text>TVA {d.vatRatePct}%</Text>
+            <Text>{money(d.vatCents, cur)}</Text>
           </View>
-          <View style={styles.totalRow}>
-            <Text>TVA 19%</Text>
-            <Text>{formatRO(order.vat_cents, currency)}</Text>
-          </View>
-          <View style={styles.totalRowGrand}>
-            <Text style={styles.grandLabel}>Total</Text>
-            <Text style={styles.grandValue}>
-              {formatRO(order.total_cents, currency)}
-            </Text>
+          <View style={s.grand}>
+            <Text style={s.grandText}>Total de plată</Text>
+            <Text style={s.grandText}>{money(d.totalCents, cur)}</Text>
           </View>
         </View>
 
-        {/* Footer */}
-        <View style={styles.footer}>
-          <Text>
-            Document generat automat de ConstructionHub Romania. Acest deviz nu
-            ține loc de factură fiscală — aceasta va fi emisă separat de
-            furnizor.
-          </Text>
-          {order.notes ? (
-            <Text style={{ marginTop: 6 }}>Observații: {order.notes}</Text>
-          ) : null}
+        {d.summary.length > 0 && (
+          <View style={s.summary}>
+            {d.summary.map((r) => (
+              <View key={r.label} style={s.totRow}>
+                <Text style={r.strong ? { fontWeight: 700 } : undefined}>{r.label}</Text>
+                <Text style={r.strong ? { fontWeight: 700 } : undefined}>{money(r.cents, cur)}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {d.warnings.length > 0 && (
+          <View style={s.warn}>
+            {d.warnings.map((w) => (
+              <Text key={w}>{w}</Text>
+            ))}
+          </View>
+        )}
+
+        <View style={s.sign}>
+          <Text>Semnătura și ștampila furnizorului</Text>
+          <Text>Semnătura de primire</Text>
+        </View>
+
+        <View style={s.notes}>
+          {d.notes.map((n) => (
+            <Text key={n}>{n}</Text>
+          ))}
+          {order.notes ? <Text>Observații: {order.notes}</Text> : null}
         </View>
       </Page>
     </Document>

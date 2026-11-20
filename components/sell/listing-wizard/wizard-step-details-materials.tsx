@@ -27,6 +27,10 @@ import {
   VEHICLE_CODES,
   VEHICLE_LABELS,
   isBulkAggregateCategory,
+  macaraAllowedFor,
+  materialProfile,
+  requiresKgPerUnit,
+  requiresTanker,
   type MaterialCategoryCode,
   type VehicleCode,
 } from "@/lib/materials-logistics/catalog"
@@ -111,10 +115,21 @@ export function WizardStepDetailsMaterials({ form, setForm, categories }: Props)
   const preview = previewSpecFromForm(form)
   const suggestionLabels = useMemo(() => {
     if (!preview) return [] as string[]
-    return suggestedVehiclesForListing(preview, offersFromRows(form.materialTransportRows))
-  }, [preview, form.materialTransportRows])
+    return suggestedVehiclesForListing(preview, offersFromRows(form.materialTransportRows), form.unit)
+  }, [preview, form.materialTransportRows, form.unit])
 
-  const showPallet = preview ? requiresPalletSection(preview) : false
+  const catCode = form.materialCategoryCode as MaterialCategoryCode
+  const profile = preview ? materialProfile(catCode, form.materialCode) : null
+  // Only units that make sense for the chosen material (e.g. no aggregates by KG).
+  const unitOptions = profile ? UNITS.filter((u) => (profile.units as readonly string[]).includes(u.value)) : UNITS
+  const kgPerUnitRequired = preview ? requiresKgPerUnit(catCode, form.materialCode, form.unit) : false
+  const isTanker = preview ? requiresTanker(catCode, form.materialCode, form.unit) : false
+  const macaraOk = preview ? macaraAllowedFor(catCode, form.materialCode, form.unit) : true
+
+  const showPallet =
+    (preview ? requiresPalletSection(preview) : false) ||
+    form.unit === "BUC" ||
+    form.unit === "ML"
   const showLength = preview ? requiresLengthSection(preview) : false
   const isBulk = form.materialCategoryCode
     ? isBulkAggregateCategory(form.materialCategoryCode as MaterialCategoryCode)
@@ -219,7 +234,7 @@ export function WizardStepDetailsMaterials({ form, setForm, categories }: Props)
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {UNITS.map((u) => (
+                  {unitOptions.map((u) => (
                     <SelectItem key={u.value} value={u.value}>
                       {u.label}
                     </SelectItem>
@@ -314,7 +329,20 @@ export function WizardStepDetailsMaterials({ form, setForm, categories }: Props)
             <Select
               value={form.materialCode || undefined}
               disabled={!form.materialCategoryCode}
-              onValueChange={(v) => setForm((f) => ({ ...f, materialCode: v }))}
+              onValueChange={(v) =>
+                setForm((f) => {
+                  const units = materialProfile(f.materialCategoryCode as MaterialCategoryCode, v)?.units
+                  // Snap the unit to one the material allows; drop a crane the material can't use.
+                  const unit = units && !(units as readonly string[]).includes(f.unit) ? units[0]! : f.unit
+                  const macara = macaraAllowedFor(f.materialCategoryCode as MaterialCategoryCode, v, unit)
+                  return {
+                    ...f,
+                    materialCode: v,
+                    unit,
+                    materialMacaraAddon: macara ? f.materialMacaraAddon : false,
+                  }
+                })
+              }
             >
               <SelectTrigger className="mt-1">
                 <SelectValue placeholder="Selecteaza materialul" />
@@ -334,14 +362,17 @@ export function WizardStepDetailsMaterials({ form, setForm, categories }: Props)
       {showPallet && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Paleti (optional)</CardTitle>
+            <CardTitle className="text-lg">Greutate si paleti</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Pentru materiale paletizate: ajuta la estimarea masei si curselor.
+              Greutatea per unitate vanduta decide cate curse legale sunt necesare.
             </p>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-3">
             <div>
-              <Label>Greutate sac (kg)</Label>
+              <Label>
+                Greutate per {form.unit === "ML" ? "metru liniar" : "bucata / sac"} (kg)
+                {kgPerUnitRequired ? " *" : ""}
+              </Label>
               <Input
                 type="number"
                 min={0}
@@ -413,7 +444,7 @@ export function WizardStepDetailsMaterials({ form, setForm, categories }: Props)
             <CardTitle className="text-lg">Transport disponibil</CardTitle>
             <p className="text-sm text-muted-foreground">
               Puteti lasa gol — platforma propune variante la cumparator. Adaugati un rand per
-              vehicul si capacitate (ex. Duba 3.5t si Tir 24t).
+              vehicul si capacitate (ex. Duba 1.5t si Tir 24t).
             </p>
           </div>
           <Button type="button" variant="outline" size="sm" className="gap-1" onClick={addTransportRow}>
@@ -422,6 +453,13 @@ export function WizardStepDetailsMaterials({ form, setForm, categories }: Props)
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
+          {isTanker && (
+            <p className="rounded-lg bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
+              Material vrac: se transporta in cisterna / siloz, care nu este in lista de vehicule.
+              Nu adaugati vehicule; transportul devine oferta manuala confirmata de operator.
+              Pentru saci, alegeti unitatea BUC.
+            </p>
+          )}
           {form.materialTransportRows.length === 0 ? (
             <p className="text-sm text-muted-foreground">Niciun vehicul bifat — livrare la alegere platforma.</p>
           ) : (
@@ -517,6 +555,7 @@ export function WizardStepDetailsMaterials({ form, setForm, categories }: Props)
         </CardContent>
       </Card>
 
+      {macaraOk && (
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Macara (optional)</CardTitle>
@@ -551,6 +590,7 @@ export function WizardStepDetailsMaterials({ form, setForm, categories }: Props)
           )}
         </CardContent>
       </Card>
+      )}
 
       {preview && suggestionLabels.length > 0 && (
         <Card>

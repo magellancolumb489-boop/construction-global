@@ -31,6 +31,7 @@ import type { MaterialLogisticsSpec } from "@/lib/materials-logistics/engine"
 import {
   buyerTransportOptions,
   materialSpecSummary,
+  PLATFORM_TRANSPORT_DEFAULTS,
   requiresPalletSection,
 } from "@/lib/materials-logistics/engine"
 
@@ -108,17 +109,31 @@ interface Props {
  * Colectează cantitatea, variante transport A/B, livrare și fiscal.
  */
 export function ConfigureMaterialsOrder({ product, initialQty }: Props) {
+  // Hooks must not run after a conditional return: guard here, hooks in the inner component.
+  if (!product.materialLogistics) return null
+  return (
+    <ConfigureMaterialsOrderInner
+      product={product}
+      ml={product.materialLogistics}
+      initialQty={initialQty}
+    />
+  )
+}
+
+function ConfigureMaterialsOrderInner({
+  product,
+  ml,
+  initialQty,
+}: Props & { ml: NonNullable<ProductDetail["materialLogistics"]> }) {
   const router = useRouter()
   const { addItem } = useCart()
   const { toast } = useToast()
 
-  const materialLogistics = product.materialLogistics
-  if (!materialLogistics) return null
-  const ml = materialLogistics
-
   const maxQ = Math.max(1, product.availableQty)
+  // Seller's minimum order (place_order rejects below it).
+  const minQ = Math.min(maxQ, product.minOrderQty && product.minOrderQty > 0 ? product.minOrderQty : 1)
   const [qty, setQty] = useState(() =>
-    Math.min(Math.max(1, initialQty), maxQ),
+    Math.min(Math.max(minQ, initialQty), maxQ),
   )
   const [palletCountStr, setPalletCountStr] = useState("")
   const [selectedOptionId, setSelectedOptionId] = useState<string>("A")
@@ -183,18 +198,29 @@ export function ConfigureMaterialsOrder({ product, initialQty }: Props) {
     }
   }, [plan.options, selectedOptionId])
 
+  // Tanker loads: no vehicle in the list; the operator quotes transport and
+  // place_order accepts the line without a vehicle. "no_eligible_vehicle" stays
+  // blocked (the server would reject it) until the seller fixes the offers.
+  const manualTransport = plan.manualReason === "tanker"
+  // Seller's per-trip fee is charged only when the seller delivers.
+  const sellerDelivers = product.sellerAssumesTransport
+
   const totals = useMemo(() => {
-    if (!selected) return null
+    if (!selected && !manualTransport) return null
     const materialNet = product.price * qty
-    const feePerLeg = product.transportFee ?? 0
+    const feePerLeg = sellerDelivers ? (product.transportFee ?? 0) : 0
     const macaraFee =
-      macaraBuyer && ml.macaraAddon ? (ml.macaraFee ?? 0) : 0
-    const transportNet = feePerLeg * selected.trips + macaraFee
+      macaraBuyer && ml.macaraAddon && !manualTransport ? (ml.macaraFee ?? 0) : 0
+    const trips = selected && !manualTransport ? selected.trips : 0
+    const transportNet = feePerLeg * trips + macaraFee
     const net = materialNet + transportNet
-    const vat = net * 0.19
+    const vat = net * product.vatRate
     const totalGross = net + vat
-    return { materialNet, transportNet, totalGross, macaraFee }
-  }, [selected, product.price, qty, product.transportFee, macaraBuyer, ml])
+    // Orientation only (06-aprilie tariff); never charged at checkout.
+    const platformMinimum =
+      !sellerDelivers && trips > 0 ? PLATFORM_TRANSPORT_DEFAULTS.minPerTrip * trips : null
+    return { materialNet, transportNet, totalGross, macaraFee, platformMinimum }
+  }, [selected, manualTransport, sellerDelivers, product.price, qty, product.transportFee, macaraBuyer, ml])
 
   const fiscalOk = useMemo(() => {
     if (!isCompany) return true
@@ -217,15 +243,16 @@ export function ConfigureMaterialsOrder({ product, initialQty }: Props) {
   ])
 
   const canAdd =
-    !!selected &&
+    (!!selected || manualTransport) &&
     !!totals &&
+    qty >= minQ &&
+    qty <= maxQ &&
     deliveryOk &&
     fiscalOk &&
-    billingOk &&
-    plan.options.length > 0
+    billingOk
 
   function handleAddToCart() {
-    if (!selected || !totals || !canAdd) return
+    if (!totals || !canAdd) return
 
     const billingPayload: OrderConfigureBuyerBilling | undefined =
       useAlternateBilling
@@ -240,19 +267,35 @@ export function ConfigureMaterialsOrder({ product, initialQty }: Props) {
           }
         : undefined
 
-    const selection = {
-      vehicleCode: selected.vehicleCode,
-      payloadT: selected.payloadT,
-      trips: selected.trips,
-      macaraAddon: macaraBuyer && ml.macaraAddon,
-      palletCount,
-      marketplaceAssigned: plan.marketplaceAssigned,
-    }
+    const selection =
+      manualTransport || !selected
+        ? {
+            vehicleCode: "",
+            payloadT: 0,
+            trips: 0,
+            macaraAddon: false,
+            palletCount,
+            marketplaceAssigned: true,
+            manualTransport: true,
+          }
+        : {
+            vehicleCode: selected.vehicleCode,
+            payloadT: selected.payloadT,
+            trips: selected.trips,
+            macaraAddon: macaraBuyer && ml.macaraAddon,
+            palletCount,
+            marketplaceAssigned: plan.marketplaceAssigned,
+          }
 
     const transportNote = [
-      selected.description,
-      plan.marketplaceAssigned ? "(Transport propus de platformă)" : "",
-      macaraBuyer && ml.macaraAddon ? `+ Macara ${totals.macaraFee} ${product.currency}` : "",
+      manualTransport
+        ? "Transport în cisternă: ofertă manuală de la operator (neinclus)."
+        : selected?.description ?? "",
+      !manualTransport && plan.marketplaceAssigned ? "(Vehicul propus de platformă)" : "",
+      !manualTransport && !sellerDelivers
+        ? "Transport organizat de platformă: cost confirmat de operator (neinclus)."
+        : "",
+      selection.macaraAddon ? `+ Macara ${totals.macaraFee} ${product.currency}` : "",
     ]
       .filter(Boolean)
       .join(" ")
@@ -332,19 +375,20 @@ export function ConfigureMaterialsOrder({ product, initialQty }: Props) {
                   <Input
                     id="mqty"
                     type="number"
-                    min={1}
+                    min={minQ}
                     max={maxQ}
+                    step="any"
                     value={qty}
-                    onChange={(e) =>
-                      setQty(
-                        Math.max(
-                          1,
-                          Math.min(maxQ, Number(e.target.value) || 1),
-                        ),
-                      )
-                    }
+                    // Clamp the minimum on blur so typing "15" over a minimum of 13 works.
+                    onChange={(e) => setQty(Math.min(maxQ, Number(e.target.value) || 0))}
+                    onBlur={() => setQty((q) => Math.min(maxQ, Math.max(minQ, q)))}
                     className="mt-1 rounded-xl"
                   />
+                  {minQ > 1 && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Comandă minimă: {minQ} {product.unit}
+                    </p>
+                  )}
                 </div>
                 {showPallet && (
                   <div>
@@ -363,10 +407,15 @@ export function ConfigureMaterialsOrder({ product, initialQty }: Props) {
                 )}
               </div>
 
-              {plan.options.length === 0 ? (
+              {plan.manualReason === "tanker" ? (
+                <p className="rounded-xl bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
+                  Material vrac: se livrează în cisternă / siloz. Transportul nu este inclus;
+                  operatorul platformei vă trimite oferta după plasarea comenzii.
+                </p>
+              ) : plan.options.length === 0 ? (
                 <p className="text-sm text-destructive">
-                  Nu există variante de transport pentru această cantitate. Reduceți cantitatea
-                  sau contactați vânzătorul.
+                  Nu există vehicule legale pentru acest material (tip / lungime). Contactați
+                  vânzătorul pentru o ofertă de transport.
                 </p>
               ) : (
                 <RadioGroup
@@ -393,7 +442,15 @@ export function ConfigureMaterialsOrder({ product, initialQty }: Props) {
                 </RadioGroup>
               )}
 
-              {ml.macaraAddon && (
+              {!manualTransport && !sellerDelivers && (
+                <p className="rounded-xl bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">
+                  Transport organizat de platformă: nu este inclus în total. Operatorul confirmă
+                  prețul (orientativ min. {PLATFORM_TRANSPORT_DEFAULTS.minPerTrip} RON / cursă,{" "}
+                  {PLATFORM_TRANSPORT_DEFAULTS.ratePerKm} RON / km, distanța doar dus).
+                </p>
+              )}
+
+              {ml.macaraAddon && !manualTransport && (
                 <div className="flex items-center justify-between rounded-xl border border-border/60 px-4 py-3">
                   <div>
                     <p className="text-sm font-medium">Macara la descărcare</p>
@@ -570,7 +627,7 @@ export function ConfigureMaterialsOrder({ product, initialQty }: Props) {
               <CardTitle className="text-lg">Revizuire</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              {totals && selected && (
+              {totals && (
                 <>
                   <div className="flex justify-between gap-2">
                     <span className="text-muted-foreground">Materiale</span>
@@ -581,13 +638,23 @@ export function ConfigureMaterialsOrder({ product, initialQty }: Props) {
                     />
                   </div>
                   <div className="flex justify-between gap-2">
-                    <span className="text-muted-foreground">Transport estimat</span>
+                    <span className="text-muted-foreground">
+                      {sellerDelivers && !manualTransport ? "Transport" : "Transport inclus"}
+                    </span>
                     <MoneyDisplay
                       amount={totals.transportNet}
                       currency={product.currency}
                       className="font-medium"
                     />
                   </div>
+                  {(manualTransport || !sellerDelivers) && (
+                    <p className="text-xs text-muted-foreground">
+                      + transport de confirmat de operator
+                      {totals.platformMinimum != null
+                        ? ` (minim orientativ ${totals.platformMinimum} RON fără TVA)`
+                        : ""}
+                    </p>
+                  )}
                   <div className="flex justify-between gap-2 border-t border-border/50 pt-2 text-base font-semibold">
                     <span>Total cu TVA</span>
                     <MoneyDisplay

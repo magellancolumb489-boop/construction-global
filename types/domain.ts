@@ -85,6 +85,8 @@ export interface CartMaterialsSelection {
   macaraAddon: boolean
   palletCount: number | null
   marketplaceAssigned: boolean
+  /** No vehicle could be proposed (e.g. tanker load): operator quotes transport. */
+  manualTransport?: boolean
 }
 
 /** Mirrors marketplace_listings.listing_type — drives PDP and cart behaviour. */
@@ -111,6 +113,16 @@ export interface ProductListItem {
   category: string
   /** When set, product cards can show the correct CTA label. */
   listingKind?: ListingKind
+  /** Listing location label (city / county). */
+  location?: string | null
+  /** false = platform organises transport (quoted separately). */
+  sellerAssumesTransport?: boolean
+  /** Material label from the materials spec, when present. */
+  materialLabel?: string | null
+  /** Seller's net price before the platform commission (price = buyer price). */
+  sellerPrice?: number
+  /** Commission rate applied to `price` (0.10 = 10%). */
+  commissionRate?: number
 }
 
 export interface ProductDetail extends ProductListItem {
@@ -130,8 +142,15 @@ export interface ProductDetail extends ProductListItem {
   sellerPhone: string | null
   /** concrete → distance calculator; other kinds use fixed fees or simple add-to-cart. */
   listingKind: ListingKind
+  /** platform_settings.vat_rate at render time (0.19 = 19%). */
+  vatRate: number
   /** Fixed transport add-on (materials / some equipment); RON/EUR per listing currency. */
   transportFee: number | null
+  /**
+   * listings.seller_assumes_transport. false = platform organises transport:
+   * transportFee is not charged; the operator quotes transport after the order.
+   */
+  sellerAssumesTransport: boolean
   minOrderQty: number | null
   pickupLat: number | null
   pickupLng: number | null
@@ -217,6 +236,14 @@ export interface OrderSummary {
   total: number
   currency: Currency
   itemCount: number
+  /** ORD-YYYYMMDD-NNNN */
+  orderNumber?: string | null
+  /** Viewer's side of the order. */
+  role?: "buyer" | "seller"
+  /** order_transport.status (included, awaiting_quote, quoted, ...). */
+  transportStatus?: string | null
+  /** Seller's share in seller view, buyer total in buyer view. */
+  amountForViewer?: number
 }
 
 export interface OrderDetail extends OrderSummary {

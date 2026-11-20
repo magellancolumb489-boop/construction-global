@@ -26,6 +26,8 @@ import { ReviewsGivenTab } from "./tabs/reviews-given-tab"
 import { PaymentMethodsTab } from "./tabs/payment-methods-tab"
 import { SellerDashboardTab } from "./tabs/seller-dashboard-tab"
 import { ListingsTab } from "./tabs/listings-tab"
+import { SubscriptionTab } from "./tabs/subscription-tab"
+import { OnboardingChecklist } from "@/components/account/onboarding-checklist"
 import { AuctionsTab } from "./tabs/auctions-tab"
 import { SellerPayoutsTab } from "./tabs/seller-payouts-tab"
 import { SellerShippingTab } from "./tabs/seller-shipping-tab"
@@ -73,12 +75,12 @@ function useTabs(data: AccountData): TabDef[] {
       { id: "orders",             label: "Comenzi",         icon: ShoppingBag,  group: "cumparator" },
       { id: "wishlist",           label: "Favorite",        icon: Heart,        group: "cumparator", badge: data.wishlist.length },
       { id: "reviews-given",      label: "Recenzii date",   icon: Star,         group: "cumparator", badge: data.reviewsGiven.length },
-      { id: "payment-methods",    label: "Metode plata",    icon: CreditCard,   group: "cumparator" },
+      { id: "payment-methods",    label: "Plăți",           icon: CreditCard,   group: "cumparator" },
 
       { id: "seller-dashboard",   label: "Dashboard",       icon: BarChart3,    group: "vanzator" },
       { id: "listings",           label: "Anunturi",        icon: Store,        group: "vanzator", badge: data.myListings.length },
-      { id: "auctions",           label: "Licitatii",       icon: Gavel,        group: "vanzator", badge: data.myAuctions.length },
-      { id: "seller-payouts",     label: "Payouts",         icon: Wallet,       group: "vanzator" },
+      { id: "subscription",       label: "Abonament",       icon: Wallet,       group: "vanzator" },
+      { id: "seller-payouts",     label: "Decontări",       icon: Wallet,       group: "vanzator" },
       { id: "seller-shipping",    label: "Livrare",         icon: Truck,        group: "vanzator" },
       { id: "seller-policies",    label: "Politici",        icon: FileText,     group: "vanzator" },
       { id: "reviews-received",   label: "Recenzii primite", icon: Star,        group: "vanzator", badge: data.reviewsReceived.length },
@@ -259,6 +261,12 @@ export default function AccountContent(props: AccountContentProps) {
 
         {/* Content area */}
         <section className="flex-1 min-w-0">
+          <OnboardingChecklist
+            profile={props.profile}
+            addressCount={props.addresses.length}
+            listingCount={props.myListings.length}
+            sellerActive={Boolean(props.profile?.seller_activated_at)}
+          />
           {activeTab === "profile" && (
             <ProfileTab userEmail={props.userEmail} profile={props.profile} />
           )}
@@ -280,12 +288,19 @@ export default function AccountContent(props: AccountContentProps) {
             <SellerDashboardTab profile={props.profile} data={props.sellerDashboard} />
           )}
           {activeTab === "listings" && (
-            <ListingsTab profile={props.profile} listings={props.myListings} />
+            <ListingsTab profile={props.profile} listings={props.myListings} commerce={props.commerce} />
+          )}
+          {activeTab === "subscription" && (
+            <SubscriptionTab
+              commerce={props.commerce}
+              subscription={props.subscription}
+              isSeller={Boolean(props.profile?.seller_activated_at)}
+            />
           )}
           {activeTab === "auctions" && (
             <AuctionsTab profile={props.profile} auctions={props.myAuctions} />
           )}
-          {activeTab === "seller-payouts" && <SellerPayoutsTab />}
+          {activeTab === "seller-payouts" && <SellerPayoutsTab profile={props.profile} data={props.sellerDashboard} />}
           {activeTab === "seller-shipping" && <SellerShippingTab profile={props.profile} />}
           {activeTab === "seller-policies" && <SellerPoliciesTab profile={props.profile} />}
           {activeTab === "reviews-received" && (

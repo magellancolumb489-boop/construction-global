@@ -22,7 +22,7 @@ export function AuctionsTab({ profile, auctions }: AuctionsTabProps) {
 
   return (
     <div className="space-y-4">
-      {!isActive && <SellerActivationBanner hasBusinessProfile={hasBusiness} />}
+      {!isActive && <SellerActivationBanner hasBusinessProfile={hasBusiness} profile={profile} />}
 
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-foreground">Licitatiile mele</h2>

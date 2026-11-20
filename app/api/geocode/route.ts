@@ -1,39 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { rateLimit } from "@/lib/rate-limit"
 
 /**
  * Server-side proxy to Nominatim (OpenStreetMap). Auth-only, rate-limited.
  *
  * - Requires a logged-in user (prevents anonymous enumeration of the proxy).
- * - Simple in-memory rolling window per user-id: 60 req/min.
- *   This bucket is per-serverless-instance; for hard guarantees swap to
- *   @upstash/ratelimit when Upstash is provisioned.
+ * - 60 req/min per user via lib/rate-limit.ts: shared Upstash Redis window
+ *   when UPSTASH_REDIS_REST_URL/TOKEN are set, else per-instance memory.
  * - `limit` query (1..5) controls single vs multi-result shape so the
  *   same endpoint serves both autocomplete and single-shot origin geocoding.
  */
 const RATE_LIMIT = 60 // requests
 const WINDOW_MS = 60_000 // per 60s rolling window
-const buckets = new Map<string, number[]>()
 
-function isRateLimited(key: string): boolean {
-  const now = Date.now()
-  const prev = buckets.get(key) ?? []
-  // Drop timestamps outside the rolling window
-  const recent = prev.filter((t) => now - t < WINDOW_MS)
-  if (recent.length >= RATE_LIMIT) {
-    buckets.set(key, recent)
-    return true
-  }
-  recent.push(now)
-  buckets.set(key, recent)
-  // Opportunistic cleanup to prevent unbounded memory growth
-  if (buckets.size > 10_000) {
-    for (const [k, arr] of buckets) {
-      if (arr.every((t) => now - t >= WINDOW_MS)) buckets.delete(k)
-    }
-  }
-  return false
-}
 
 /** Nominatim address sub-object returned when addressdetails=1 */
 interface NominatimAddress {
@@ -93,7 +73,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  if (isRateLimited(user.id)) {
+  // Shared Redis window when Upstash is configured (lib/rate-limit.ts), else per-instance memory.
+  if (!(await rateLimit("geocode:" + user.id, RATE_LIMIT, WINDOW_MS / 1000)).allowed) {
     return NextResponse.json(
       { error: "Prea multe cereri. Reincercati in cateva secunde." },
       { status: 429 }

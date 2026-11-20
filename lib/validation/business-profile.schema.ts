@@ -1,23 +1,36 @@
 import { z } from "zod"
+import "./errors"
+import { isValidCui, isValidIban, isValidRegCom, normalizeCui, normalizeIban } from "./ro-fiscal"
 
 export const entityTypeSchema = z.enum(["PF", "PFA", "SRL", "SA", "II", "IF"])
 
-// CUI/CIF: optional `RO` prefix plus 2-10 digits.
+// CUI/CIF: digits only after normalisation, verified by the ANAF check digit.
 const cuiSchema = z
   .string()
   .trim()
-  .regex(/^RO?\d{2,10}$/i, "CIF invalid. Format: RO12345678")
+  .transform(normalizeCui)
+  .refine(isValidCui, "CUI invalid (cifra de control nu se potrivește). Exemplu: 18547290")
 
-// Registry number for legal entities: Jxx/yyyyy/zzzz
+// Trade register number: J12/3456/2020 or the post-2024 ONRC format.
 const regComSchema = z
   .string()
   .trim()
-  .regex(/^J\d{1,2}\/\d{1,6}\/\d{4}$/, "Format invalid. Exemplu: J12/3456/2020")
+  .transform((v) => v.replace(/\s+/g, "").toUpperCase())
+  .refine(isValidRegCom, "Nr. Reg. Com. invalid. Exemplu: J12/3456/2020 sau J2024001234401")
 
+// VAT code = "RO" + a valid CUI (only for VAT payers).
 const vatIdSchema = z
   .string()
   .trim()
-  .max(20)
+  .transform((v) => v.replace(/\s+/g, "").toUpperCase())
+  .refine((v) => /^RO\d{2,10}$/.test(v) && isValidCui(v), "Cod TVA invalid. Format: RO + CUI valid")
+
+// Bank account for proformas; mod-97 checked, stored without spaces.
+const ibanSchema = z
+  .string()
+  .trim()
+  .transform(normalizeIban)
+  .refine(isValidIban, "IBAN invalid (verificați caracterele). Exemplu: RO49AAAA1B31007593840000")
 
 const fiscalAddressSchema = z
   .object({
@@ -45,6 +58,8 @@ export const businessProfileSchema = z
     tax_id: cuiSchema.nullable().optional(),
     reg_com: regComSchema.nullable().optional(),
     vat_id: vatIdSchema.nullable().optional(),
+    iban: ibanSchema.nullable().optional(),
+    bank_name: z.string().trim().min(2).max(120).nullable().optional(),
     fiscal_address: fiscalAddressSchema,
     website_url: z
       .string()
@@ -62,6 +77,13 @@ export const businessProfileSchema = z
           code: z.ZodIssueCode.custom,
           path: ["tax_id"],
           message: "CIF obligatoriu pentru entitati juridice.",
+        })
+      }
+      if (!val.fiscal_address?.line1 || !val.fiscal_address?.city) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["fiscal_address"],
+          message: "Adresa fiscală (stradă și localitate) este obligatorie pentru firme; apare pe proforme.",
         })
       }
       if (!val.company_name || val.company_name.length < 2) {

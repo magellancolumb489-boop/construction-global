@@ -9,6 +9,7 @@ import { Download, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DevizPdfDocument } from "./deviz-pdf-document"
 import type { PlacedOrder } from "@/app/checkout/actions"
+import type { ProformaCopy } from "@/lib/checkout/proforma"
 
 // PDFDownloadLink is client-only. ssr: false dodges "self is not defined".
 const PDFDownloadLink = dynamic(
@@ -26,6 +27,8 @@ const PDFDownloadLink = dynamic(
 
 export interface DevizPdfDownloadProps {
   order: PlacedOrder
+  /** Which proforma: buyer (default), seller or platform. */
+  copy?: ProformaCopy
   label?: string
   fileName?: string
   variant?: "default" | "outline" | "secondary"
@@ -34,6 +37,7 @@ export interface DevizPdfDownloadProps {
 
 export function DevizPdfDownload({
   order,
+  copy = "buyer",
   label = "Descarcă PDF",
   fileName,
   variant = "outline",
@@ -41,11 +45,11 @@ export function DevizPdfDownload({
 }: DevizPdfDownloadProps) {
   const file =
     fileName ??
-    `deviz-${order.deviz_number ?? order.order_number ?? order.id}.pdf`
+    `proforma-${copy}-${order.order_number || order.id}.pdf`
 
   return (
     <PDFDownloadLink
-      document={<DevizPdfDocument order={order} />}
+      document={<DevizPdfDocument order={order} copy={copy} />}
       fileName={file}
       style={{ textDecoration: "none" }}
     >

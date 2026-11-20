@@ -12,7 +12,9 @@ import {
   isVolumetricMaterial,
   MATERIAL_CATEGORY_LABELS,
   MATERIAL_LABELS,
+  materialProfile,
   PAYLOAD_OPTIONS_BY_VEHICLE,
+  requiresTanker,
   SMALL_DIMS_VEHICLE_PRIORITY,
   vehiclesForLongMaterial,
   VEHICLE_LABELS,
@@ -50,6 +52,8 @@ function nominalVolumeCapacityM3(vehicle: VehicleCode): number {
       return 42
     case "TRAILER":
       return 48
+    case "CAMION_PLATFORMA":
+      return 34
     case "AUTOBASCULANTA":
       return 18
     default:
@@ -57,7 +61,29 @@ function nominalVolumeCapacityM3(vehicle: VehicleCode): number {
   }
 }
 
-/** Estimate total mass (kg) from order qty + listing unit + pallet hints. */
+/** Fallback kg per piece when neither seller nor profile knows (legacy listings). */
+const FALLBACK_KG_PER_UNIT = 25
+/** Fallback bulk density when the material has no profile (legacy listings). */
+const FALLBACK_DENSITY_KG_M3 = 1600
+/** One "cupa" (loader bucket) is treated as 1 m3. */
+const CUP_M3 = 1
+
+function densityFor(spec: MaterialLogisticsSpec): number {
+  return materialProfile(spec.categoryCode, spec.materialCode)?.densityKgM3 ?? FALLBACK_DENSITY_KG_M3
+}
+
+/** Seller's kg per unit (stored in pallet_sac_kg) wins over the profile default. */
+export function kgPerUnitFor(spec: MaterialLogisticsSpec): number {
+  if (spec.palletSacKg != null && spec.palletSacKg > 0) return spec.palletSacKg
+  return materialProfile(spec.categoryCode, spec.materialCode)?.kgPerUnit ?? FALLBACK_KG_PER_UNIT
+}
+
+/**
+ * Estimate total mass (kg) from order qty + listing unit + material.
+ * Pallet count can only raise the estimate: a buyer-typed pallet count lower
+ * than the quantity implies must not shrink the load below the legal trip count.
+ * SQL twin: public.materials_estimate_mass_kg_v2 (keep in sync).
+ */
 export function estimateTotalMassKg(input: {
   qty: number
   unit: string
@@ -67,31 +93,34 @@ export function estimateTotalMassKg(input: {
   const { qty, unit, spec } = input
   const palletCount = input.palletCount ?? null
 
-  if (
-    palletCount != null &&
-    palletCount > 0 &&
-    spec.palletTotalKg != null &&
-    spec.palletTotalKg > 0
-  ) {
-    return palletCount * spec.palletTotalKg
-  }
-
+  let base: number
   switch (unit) {
     case "TON":
-      return qty * 1000
+      base = qty * 1000
+      break
     case "KG":
-      return qty
+      base = qty
+      break
     case "M3":
-      return qty * 1600
+      base = qty * densityFor(spec)
+      break
     case "CUP":
-      return qty * 1500
+      base = qty * CUP_M3 * densityFor(spec)
+      break
     case "CAMION":
-      return qty * 18000
+      base = qty * 18000
+      break
     case "BUC":
     case "ML":
     default:
-      return qty * 25
+      base = qty * kgPerUnitFor(spec)
+      break
   }
+
+  if (palletCount != null && palletCount > 0 && spec.palletTotalKg != null && spec.palletTotalKg > 0) {
+    return Math.max(base, palletCount * spec.palletTotalKg)
+  }
+  return base
 }
 
 /** Optional volume (m3) for volumetric-led rules. */
@@ -103,6 +132,10 @@ export function estimateVolumeM3(input: {
 }): number | null {
   const { qty, unit, spec } = input
   if (unit === "M3") return qty
+  if (unit === "CUP") return qty * CUP_M3
+  if ((unit === "BUC" || unit === "ML") && isVolumetricMaterial(spec.categoryCode, spec.materialCode)) {
+    return (qty * kgPerUnitFor(spec)) / densityFor(spec)
+  }
   if (
     input.palletCount != null &&
     input.palletCount > 0 &&
@@ -145,11 +178,21 @@ function minTripsForOffer(
   return Math.max(tripsMass, tripsVol)
 }
 
-/** Rule 8 + length + payload validity: filter seller (or marketplace) offers. */
+/** Unknown piece length on a long material: assume the longest band (safe side). */
+const UNKNOWN_LONG_PIECE_M = 12
+
+/**
+ * Rule 8 + length + payload validity: filter seller (or marketplace) offers.
+ * Applies equally to seller-declared offers and platform defaults.
+ * SQL twin: public.materials_offer_allowed.
+ */
 export function eligibleSellerOffers(
   spec: MaterialLogisticsSpec,
   offers: TransportOfferRow[],
+  unit?: string,
 ): TransportOfferRow[] {
+  if (unit && requiresTanker(spec.categoryCode, spec.materialCode, unit)) return []
+
   const out: TransportOfferRow[] = []
   for (const o of offers) {
     if (!isValidPayload(o.vehicleCode, o.payloadT)) continue
@@ -160,8 +203,9 @@ export function eligibleSellerOffers(
       continue
     }
 
-    if (isLongMaterial(spec.categoryCode, spec.materialCode) && spec.maxPieceLengthM != null) {
-      const allowed = new Set(vehiclesForLongMaterial(spec.maxPieceLengthM))
+    if (isLongMaterial(spec.categoryCode, spec.materialCode)) {
+      const len = spec.maxPieceLengthM ?? UNKNOWN_LONG_PIECE_M
+      const allowed = new Set(vehiclesForLongMaterial(len))
       if (!allowed.has(o.vehicleCode)) continue
     }
 
@@ -174,8 +218,12 @@ export function eligibleSellerOffers(
 export function suggestedVehiclesForListing(
   spec: MaterialLogisticsSpec,
   offers: TransportOfferRow[],
+  unit?: string,
 ): string[] {
-  const eligible = eligibleSellerOffers(spec, offers)
+  if (unit && requiresTanker(spec.categoryCode, spec.materialCode, unit)) {
+    return ["Cisterna / siloz (ofertă manuală — nu este în lista de vehicule)"]
+  }
+  const eligible = eligibleSellerOffers(spec, offers, unit)
   const labels: string[] = []
 
   const append = (rows: TransportOfferRow[]) => {
@@ -196,10 +244,11 @@ export function suggestedVehiclesForListing(
 
   const defaults = defaultMarketplaceVehiclesForCategory(spec.categoryCode)
   append(
-    defaults.map((d) => ({
-      vehicleCode: d.vehicle,
-      payloadT: d.payloadT,
-    })),
+    eligibleSellerOffers(
+      spec,
+      defaults.map((d) => ({ vehicleCode: d.vehicle, payloadT: d.payloadT })),
+      unit,
+    ),
   )
 
   if (spec.categoryCode === "DIMENSIUNI_MICI") {
@@ -227,6 +276,8 @@ export interface BuyerTransportPlan {
   options: BuyerTransportOption[]
   /** When true, choices come from marketplace defaults (seller had no offers). */
   marketplaceAssigned: boolean
+  /** Set when no vehicle can be proposed automatically; the operator quotes transport. */
+  manualReason?: "tanker" | "no_eligible_vehicle"
 }
 
 /**
@@ -243,7 +294,11 @@ export function buyerTransportOptions(input: {
   const massKg = estimateTotalMassKg(input)
   const volumeM3 = estimateVolumeM3(input)
 
-  let pool = eligibleSellerOffers(spec, input.sellerOffers)
+  if (requiresTanker(spec.categoryCode, spec.materialCode, unit)) {
+    return { options: [], marketplaceAssigned: true, manualReason: "tanker" }
+  }
+
+  let pool = eligibleSellerOffers(spec, input.sellerOffers, unit)
   let marketplaceAssigned = false
 
   if (pool.length === 0) {
@@ -254,11 +309,12 @@ export function buyerTransportOptions(input: {
         vehicleCode: d.vehicle,
         payloadT: d.payloadT,
       })),
+      unit,
     )
   }
 
   if (pool.length === 0) {
-    return { options: [], marketplaceAssigned }
+    return { options: [], marketplaceAssigned, manualReason: "no_eligible_vehicle" }
   }
 
   const scored = pool.map((o) => ({
@@ -323,6 +379,27 @@ export function buyerTransportOptions(input: {
   }
 
   return { options, marketplaceAssigned }
+}
+
+/**
+ * Platform-organised transport (seller does not deliver): orientation tariff
+ * from the client brief (06-aprilie): 12 RON/km one way, minimum 200 RON per
+ * trip (covers < ~17 km). Open client questions: per-vehicle rate, net vs
+ * gross. Shown as an estimate only; the operator confirms the real price, so
+ * place_order charges 0 transport for these lines.
+ */
+export const PLATFORM_TRANSPORT_DEFAULTS = {
+  ratePerKm: 12,
+  minPerTrip: 200,
+} as const
+
+export function estimatePlatformTransport(distanceOneWayKm: number | null, trips: number): number | null {
+  if (distanceOneWayKm == null || !Number.isFinite(distanceOneWayKm) || distanceOneWayKm < 0) return null
+  const perTrip = Math.max(
+    PLATFORM_TRANSPORT_DEFAULTS.minPerTrip,
+    distanceOneWayKm * PLATFORM_TRANSPORT_DEFAULTS.ratePerKm,
+  )
+  return Math.round(perTrip * Math.max(1, trips) * 100) / 100
 }
 
 export function materialSpecSummary(spec: MaterialLogisticsSpec): string {

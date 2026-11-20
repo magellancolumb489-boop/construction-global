@@ -3,25 +3,38 @@
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Sparkles, Loader2, AlertCircle } from "lucide-react"
+import { Sparkles, Loader2, AlertCircle, CheckCircle2, Circle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { activateSellerAction } from "@/app/account/actions"
+import {
+  REQUIREMENT_INFO,
+  sellerMissing,
+  type ReadinessProfile,
+  type SellerRequirement,
+} from "@/lib/account/seller-readiness"
 
 interface SellerActivationBannerProps {
-  hasBusinessProfile: boolean
+  /** Kept for existing call sites; the checklist below is computed from `profile`. */
+  hasBusinessProfile?: boolean
+  profile?: ReadinessProfile | null
   minimal?: boolean
 }
 
-// Single-source CTA for seller features. Shown across every seller tab when
-// profiles.seller_activated_at is null. Activation is a single server action
-// call — no Stripe, no KYC, no hard role flip (matches unified-tabs choice).
-export function SellerActivationBanner({
-  hasBusinessProfile,
-  minimal = false,
-}: SellerActivationBannerProps) {
+const ALL: SellerRequirement[] = ["display_name", "phone", "entity_type", "fiscal_address", "iban", "company_name", "tax_id"]
+
+// Seller features unlock only when the DB (activate_seller) confirms the
+// profile is complete. The checklist shows exactly what is missing and links
+// to the tab where it is filled in.
+export function SellerActivationBanner({ profile, minimal = false }: SellerActivationBannerProps) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  const [serverMissing, setServerMissing] = useState<string[] | null>(null)
+
+  const missing = (serverMissing as SellerRequirement[] | null) ?? sellerMissing(profile)
+  const isCompany = profile?.entity_type && profile.entity_type !== "PF"
+  const shown = ALL.filter((r) => isCompany || (r !== "company_name" && r !== "tax_id"))
+  const ready = missing.length === 0
 
   function handleActivate() {
     setError(null)
@@ -29,6 +42,7 @@ export function SellerActivationBanner({
       const res = await activateSellerAction()
       if (!res.success) {
         setError(res.error)
+        if (res.missing) setServerMissing(res.missing)
         return
       }
       router.refresh()
@@ -42,42 +56,51 @@ export function SellerActivationBanner({
         minimal ? "" : "mb-6",
       ].join(" ")}
     >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Sparkles className="h-5 w-5" aria-hidden="true" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-sm font-bold text-foreground sm:text-base">
-              Deveniți vânzător
-            </h3>
-            <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-              Activați contul de vânzător ca să publicați anunțuri, licitații și să accesați dashboard-ul.
-              Plățile se vor activa separat după configurarea Stripe.
-            </p>
-          </div>
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Sparkles className="h-5 w-5" aria-hidden="true" />
         </div>
-        <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
-          {!hasBusinessProfile && (
-            <Button
-              asChild
-              variant="outline"
-              size="sm"
-              className="h-10 rounded-xl"
-            >
-              <Link href="/account?tab=business">Completeaza datele firmei</Link>
-            </Button>
-          )}
-          <Button
-            onClick={handleActivate}
-            disabled={pending}
-            size="sm"
-            className="h-10 rounded-xl bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
-          >
-            {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Activați vânzător
-          </Button>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-bold text-foreground sm:text-base">Devino vânzător</h3>
+          <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
+            Pentru a publica anunțuri și a primi comenzi, completează datele de mai jos. Ele apar pe proformele
+            comenzilor tale (nu în profilul public).{" "}
+            <Link href="/ghid#vanzator" className="underline">Cum funcționează?</Link>
+          </p>
+          <ul className="mt-3 grid gap-1 text-xs sm:grid-cols-2">
+            {shown.map((r) => {
+              const done = !missing.includes(r)
+              return (
+                <li key={r} className="flex items-center gap-2">
+                  {done ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  ) : (
+                    <Circle className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  {done ? (
+                    <span className="text-muted-foreground line-through">{REQUIREMENT_INFO[r].label}</span>
+                  ) : (
+                    <Link href={`/account?tab=${REQUIREMENT_INFO[r].tab}`} className="font-medium text-foreground underline">
+                      {REQUIREMENT_INFO[r].label}
+                    </Link>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
         </div>
+      </div>
+      <div className="mt-4 flex justify-end">
+        <Button
+          onClick={handleActivate}
+          disabled={pending || !ready}
+          size="sm"
+          className="h-10 rounded-xl bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
+          title={ready ? undefined : "Completează mai întâi datele de mai sus"}
+        >
+          {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+          {ready ? "Activează contul de vânzător" : `Mai ai ${missing.length} pași`}
+        </Button>
       </div>
       {error && (
         <div className="mt-3 flex items-start gap-2 text-xs text-rose-600" role="alert">

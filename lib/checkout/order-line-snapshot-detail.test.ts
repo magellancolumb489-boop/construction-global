@@ -44,4 +44,14 @@ describe("orderLineSnapshotSubline", () => {
     expect(orderLineSnapshotSubline({})).toBeNull()
     expect(orderLineSnapshotSubline(null)).toBeNull()
   })
+
+  it("notes transport that was not charged", () => {
+    expect(orderLineSnapshotSubline({ transport_status: "manual_quote" })).toBe(
+      "Transport în cisternă — ofertă manuală, neinclus",
+    )
+    expect(
+      orderLineSnapshotSubline({ concrete_class_code: "C25/30", transport_status: "platform_quote" }),
+    ).toBe("C25/30 · Transport organizat de platformă — cost confirmat separat")
+    expect(orderLineSnapshotSubline({ concrete_class_code: "C25/30", transport_status: "seller_fee" })).toBe("C25/30")
+  })
 })

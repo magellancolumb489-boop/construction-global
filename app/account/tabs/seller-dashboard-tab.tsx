@@ -1,11 +1,12 @@
 import Link from "next/link"
 import {
-  Store, Gavel, TrendingUp, Star, MessageSquare, Wallet, Plus, BarChart3,
+  Store, ShoppingBag, ClipboardList, Star, MessageSquare, Wallet, Plus, HelpCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { KpiCard } from "@/components/shared/kpi-card"
 import { SellerActivationBanner } from "@/components/shared/seller-activation-banner"
-import { StripeSeamCard } from "@/components/shared/stripe-seam-card"
+import { formatMoney } from "@/components/shared/money-display"
+import type { Currency } from "@/types/domain"
 import type { SellerDashboard } from "@/lib/api/seller"
 import type { Profile } from "@/lib/api/profile-client"
 
@@ -20,7 +21,7 @@ export function SellerDashboardTab({ profile, data }: SellerDashboardTabProps) {
 
   return (
     <div className="space-y-5">
-      {!isActive && <SellerActivationBanner hasBusinessProfile={hasBusiness} />}
+      {!isActive && <SellerActivationBanner hasBusinessProfile={hasBusiness} profile={profile} />}
 
       <div className="flex items-center justify-between">
         <div>
@@ -31,8 +32,8 @@ export function SellerDashboardTab({ profile, data }: SellerDashboardTabProps) {
           <Button variant="outline" size="sm" className="rounded-xl" asChild>
             <Link href="/sell/listing/new"><Plus className="mr-1 h-3.5 w-3.5" /> Anunt</Link>
           </Button>
-          <Button size="sm" className="rounded-xl bg-primary text-primary-foreground" asChild>
-            <Link href="/sell/auction/new"><Plus className="mr-1 h-3.5 w-3.5" /> Licitatie</Link>
+          <Button variant="ghost" size="sm" className="rounded-xl" asChild>
+            <Link href="/ghid#vanzator"><HelpCircle className="mr-1 h-3.5 w-3.5" /> Ghid</Link>
           </Button>
         </div>
       </div>
@@ -45,16 +46,16 @@ export function SellerDashboardTab({ profile, data }: SellerDashboardTabProps) {
           hint={`${data.totalListings} in total`}
         />
         <KpiCard
-          icon={Gavel}
-          label="Licitatii"
-          value={data.activeAuctions}
-          hint={`${data.liveAuctions} live`}
+          icon={ShoppingBag}
+          label="Comenzi (30 zile)"
+          value={data.orders30d}
+          hint="Comenzi primite, fără cele anulate"
         />
         <KpiCard
-          icon={TrendingUp}
-          label="Oferte (30 zile)"
-          value={data.totalBids30d}
-          hint="Pe toate licitatiile voastre"
+          icon={ClipboardList}
+          label="De procesat"
+          value={data.ordersToHandle}
+          hint="Livrări de programat sau probleme"
         />
         <KpiCard
           icon={Star}
@@ -70,23 +71,18 @@ export function SellerDashboardTab({ profile, data }: SellerDashboardTabProps) {
         />
         <KpiCard
           icon={Wallet}
-          label="Venit lifetime"
-          value="-"
-          hint="Se activeaza dupa Stripe"
+          label="Vânzări totale (cu TVA)"
+          value={formatMoney(data.lifetimeRevenue, data.currency as Currency)}
+          hint={`Plătite, de decontat: ${formatMoney(data.pendingPayouts, data.currency as Currency)}`}
         />
       </div>
 
-      <StripeSeamCard
-        icon={BarChart3}
-        title="Statistici avansate si payouts"
-        description="Dupa activarea Stripe veti vedea incasari, comisioane, rambursari, evolutie lunara si rapoarte fiscale."
-        bulletPoints={[
-          "Comisioane platforma + Stripe",
-          "Rambursari si dispute",
-          "Rapoarte lunare si anuale",
-          "Export CSV pentru contabilitate",
-        ]}
-      />
+      {data.ordersToHandle > 0 && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
+          Ai {data.ordersToHandle} comenzi care așteaptă programarea livrării.{" "}
+          <Link href="/account?tab=orders" className="font-semibold underline">Vezi comenzile</Link>
+        </div>
+      )}
     </div>
   )
 }

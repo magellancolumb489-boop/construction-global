@@ -20,6 +20,7 @@ import {
   ClipboardList,
   Settings,
   Heart,
+  BookOpen,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -36,6 +37,7 @@ const navLinks = [
   { href: "/", label: "Acasa", icon: Home },
   { href: "/auctions", label: "Licitatii", icon: Gavel },
   { href: "/marketplace", label: "Magazin", icon: Store },
+  { href: "/ghid", label: "Ghid", icon: BookOpen },
 ]
 
 const publishLinks = [

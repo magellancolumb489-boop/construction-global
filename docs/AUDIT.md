@@ -113,6 +113,202 @@ Still open from this batch:
 - **Q17.** `available_qty` is now consumed by orders for every listing type. For ready-mix concrete, it may mean production capacity rather than stock. Confirm, or exclude concrete/services from the decrement.
 - Seller can still buy their own listing (no check in `place_order`). Minor; add when the order state machine is built.
 
+## 3d. Materials calculator, transport and filters (2026-11-20, second pass)
+
+Sources: `1.docx` (taxonomy + vehicle list), `06-aprilie.docx` (12 RON/km one way, 200 RON under 15 km, "no 2 t of sand in a van", open questions), `calculationnn2.docx` (CIFA/POMPA/VRAC/DEPOZIT; unchanged here).
+
+### Blind spots found
+| # | Problem | Effect |
+|---|---|---|
+| M1 | Mass came from the unit only: every M3 weighed 1600 kg/m3, every BUC/ML 25 kg | Mineral wool (~20 kg/m3) was planned like sand. 1000 bricks counted as 25 t. Trip counts and vehicle choice were wrong. |
+| M2 | Van (duba) payload options 2 t and 3.5 t | These are gross-weight figures, so the plans were illegal loads. This is the client's own example. |
+| M3 | Loose cement, filer and bitumen were planned on vans and trucks | They need a tanker or silo truck, which is not on the vehicle list. Hot bitumen in a van. |
+| M4 | Server checked vehicle rules only when the platform assigned the vehicle | Sellers could offer any vehicle for any material (e.g. a van for 12 m steel bars) and checkout accepted it. |
+| M5 | Long material with no piece length skipped the length filter | 12 m bars could be planned in a van. |
+| M6 | The buyer's pallet count replaced the quantity-based mass on the server | Typing "1 pallet" for 40 t of bags cut the required trips to 1 (trust bug). |
+| M7 | "Transport organizat de platformă" (`seller_assumes_transport = false`) was never read | The seller's flat fee (or 0) was charged as if the seller delivered. The checkbox did nothing. |
+| M8 | Transport price = flat fee × trips, the same for every vehicle and distance | Not fixable without client tariffs; see Q18. |
+| M9 | Any unit was allowed for any material | Live listing 7 is crushed stone at 20 RON/KG. |
+| M10 | Wizard offered units CUP and CAMION; the DB CHECK rejected them | Seller got a raw DB error. |
+| M11 | Crane add-on allowed on tipped aggregates | Live listing 7 has it. |
+| M12 | Seller kg per piece/bag not collected for BUC/ML | Mass for bricks, BCA, plasterboard and steel was a guess. |
+| M13 | Configurator: React hooks after a conditional `return null`; quantity ignored `min_order_qty` | A runtime hook-order error was possible; checkout rejected quantities with no warning. |
+| M14 | Marketplace loaded the first 20 listings and filtered/sorted them in the browser; the only filter was "Categorie", and the table has 0 rows | Buyers could not filter at all. Listing 21+ could never be found. |
+| M15 | Seller listings tab had no filters and no stock view | Now that orders consume stock, sellers could not see listings that had sold out. |
+| M16 | Client bug list B2: stock quantity on marketplace cards | Removed. |
+
+### What changed
+- `lib/materials-logistics/catalog.ts`:
+  - `MATERIAL_PROFILES` for all 48 materials: allowed units, density, default kg per bag.
+  - Rule helpers: `requiresTanker`, `macaraAllowedFor`, `requiresKgPerUnit`.
+  - New vehicle `CAMION_PLATFORMA`; van capped at 1.5 t; platform trucks added to the length bands.
+- `lib/materials-logistics/engine.ts`:
+  - Mass and volume estimates use the material, and a pallet count can only raise them.
+  - Long materials with unknown length go only on TIR or trailer.
+  - Tanker materials return `manualReason: "tanker"`.
+  - `estimatePlatformTransport` (shown as an estimate only).
+- `lib/validation/listing.schema.ts` `materialListingIssue()`: unit must suit the material; long materials need a piece length; BUC/ML need kg per unit; no crane on bulk or tanker loads; every offered vehicle must be legal for the material. It runs in the wizard and again in `upsertMaterialLogisticsAction`, using the unit stored in the DB.
+- Wizard: unit list follows the material, a kg-per-unit field, the crane option hidden where it can't apply, and a tanker warning.
+- Migration `20261120163833_materials_logistics_v2_rules_and_place_order_v3`, applied on live:
+  - Unit CHECK now includes CUP and CAMION; vehicle CHECK includes CAMION_PLATFORMA; new payload table.
+  - SQL twins `materials_density_kg_m3`, `materials_default_kg_per_unit`, `materials_estimate_mass_kg_v2`, `materials_requires_tanker`, `materials_offer_allowed`. The CASE tables are generated from the TS profiles.
+  - `place_order` v3 applies the material rules to seller offers too and uses the material-aware mass.
+  - Tanker lines are recorded with `transport_status = 'manual_quote'` and 0 transport.
+  - Lines with `seller_assumes_transport = false` are recorded with `transport_status = 'platform_quote'` and 0 transport; only the seller's crane fee is still charged.
+- SQL/TS parity verified on live (rolled back). Mass for bags/pallets, mineral wool and balast, tanker flags, length bands and the 2 t van cap give identical results. On listing 10, transport is the seller fee × trips, a 1-trip plan for 30 t is rejected, and platform transport is 0 with status `platform_quote`.
+- Configurator / PDP / cart:
+  - The seller fee is charged only when the seller delivers. Platform and tanker transport show a clear "not included, operator confirms" note with the 06-aprilie minimum as orientation.
+  - Minimum order quantity is enforced, and the hook-order error is fixed.
+- Deviz, emails and order detail append the transport note from `transport_status`.
+- Marketplace: filters run on the server from the URL across all listings:
+  - Tip anunț, categorie material, material, transport (vânzător / platformă), localitate, preț min/max, search (LIKE wildcards escaped), sort, 24 per page.
+  - Unknown URL values are dropped.
+  - Verified against live: all 10 listings, materials 4, concrete 6, crushed stone 2, criblura 4–8 1.
+- Seller listings tab: search, type, status, "fără stoc" filter; shows stock and transport mode.
+
+### Still open (need the client)
+- **Q18.** Transport tariff when the platform organises it: is 12 RON/km universal, or per vehicle / time of day? Is the 200 RON minimum net or gross? Is 7 m3 the legal load for a mixer? Until answered, platform transport is quoted by the operator and never charged at checkout.
+- **Q19.** Distance: materials listings have no pickup coordinates (0 of 4 live). Automatic distance pricing needs a pickup address in the materials wizard (the concrete wizard already has one) plus a server-side distance check.
+- **Q20.** Cisterna / siloz and standalone macara and autobetonieră/pompă for materials: add them to the vehicle list, or keep tanker loads as manual offers?
+- **Q21.** Payload tables for AUTOUTILITARA (3.5 t) and the defaults in `MATERIAL_PROFILES` (bag weights, densities) are orientation values. Please confirm.
+- **Data cleanup (seller action):** listing 7 is titled "ciment saci" but its spec says criblura 8–16, sold by KG with a crane. Listings 5 and 6 have no materials spec. The new rules stop this on the next edit; existing rows are untouched.
+- `types/supabase.ts` is not regenerated (hand-patched block); new SQL helpers are not called from the app.
+
+## 3e. Middleman money, transport, payments, proformas (2026-11-20, third pass)
+
+### Applied on live (all verified in rolled-back transactions)
+| Migration | What |
+|---|---|
+| `20261120170150_platform_fees_transport_payments_subscriptions` | `platform_settings` (commission, VAT, payments mode, fees, TTLs, platform identity); listing soft delete + partial unique slug + browse indexes; order commission / VAT split / proforma fields; `order_transport` + `order_transport_events` state machine; `payment_intents` + provider-agnostic payment RPCs; subscriptions + publication gate; maintenance RPC |
+| `20261120170340_place_order_v4_commission_vat_split_transport` | `place_order` reads settings: commission, VAT per issuer, live vs demo payment status, transport record, `COM-` platform document number |
+| `20261120170503_listings_select_owner_sees_soft_deleted` | Fix found by the test: Postgres checks the updated row against SELECT policies, so owners could not soft-delete |
+| `20261120170849_profiles_bank_details_order_party_snapshots` | `profiles.iban` / `bank_name` (not in public column grants); orders freeze seller IBAN and platform identity at order time |
+
+End-to-end results on live, rolled back:
+- **Commission:** 10% on 2,250 RON goods = 225 RON. VAT: seller 617.50, platform 42.75. Total 4,135.25 RON.
+- **Seller-delivered transport:** schedule, then delivery confirmed by the buyer; the order becomes `fulfilled`.
+- **Platform transport:**
+  - The operator quotes, the buyer accepts and pays 1,428 RON (1,200 + 19% VAT).
+  - The operator assigns a carrier, the load ships and is delivered; 7 audit events.
+  - A buyer cannot quote.
+- **Cancel while awaiting a quote:** stock comes back.
+- **Live payments:**
+  - The order stays `pending`, then an intent goes to the provider.
+  - A wrong webhook secret is rejected and a wrong amount gives `amount_mismatch`.
+  - A good event marks the order paid; a replay returns `duplicate`.
+- **Soft delete:**
+  - Deleted listings are inactive and owners cannot undelete.
+  - The slug can be reused.
+  - Sellers cannot write `publish_paid_until`.
+- **Listing fee gate:** blocks publishing until the fee is paid, then allows it.
+
+### Model (what the client asked for, and how it is enforced)
+- **Commission as a buyer markup.** Buyers see the seller price × (1 + rate): a 10,000 RON listing shows as 11,000 RON (+ VAT). The markup is applied once, in the server mappers (`lib/api/listings.ts`). `place_order` charges `round(goods_cents × rate)`; `lib/pricing/commission.ts` mirrors it and is tested to the cent. Sellers see and receive their own price.
+- **Transport state machine** (`transport_transition`, every step logged):
+  - Seller delivers: `included → scheduled → in_transit → delivered`.
+  - Platform or tanker transport: `awaiting_quote → quoted (TTL) → accepted | declined → (re-quote, max 3) → assigned (live: only after transport is paid) → in_transit → delivered`.
+  - Any step can go to `failed` (with a reason). The order can be cancelled before shipping; cancelling restores stock, cancels open payment intents and flags `refund_pending` if money was taken.
+  - Expired quotes can never be accepted (expiry is checked on every action and by maintenance).
+- **Payments** (`lib/payments/*`, `app/payments/actions.ts`, `/api/payments/webhook/[provider]`):
+  - One entry point for order, transport, subscription and listing fee. The DB computes the amount.
+  - The provider adapter only creates the checkout and parses the webhook.
+  - The webhook is verified by the provider adapter, then applied via `record_payment_event`, which is idempotent and checks amount and currency.
+  - No service-role key: the webhook RPC is gated by a shared secret whose SHA-256 sits in `private.app_secrets`.
+  - Demo mode keeps working without any provider. The old Stripe stub and the `NEXT_PUBLIC_PAYMENTS_MODE` flag are removed; that flag was also the broken `orders.update` path.
+- **To go live** (no code change except the adapter):
+  1. Pick the provider and implement `lib/payments/providers/<id>.ts` (two functions, see `pending.ts`).
+  2. Register it in `registry.ts`.
+  3. Set `PAYMENTS_PROVIDER`, `APP_BASE_URL` and `PAYMENTS_WEBHOOK_DB_SECRET`.
+  4. Run `select private.set_secret('payments_webhook', '<same value>')`.
+  5. Switch Admin → Setări → Mod plăți to Live.
+- **Subscriptions and post fees** are both off by default; enable them in Admin → Setări platformă.
+  - Plans can cap active listings and waive the post fee. Renewal extends the period; a plan change cancels the old plan.
+  - With fees on and no covering plan, a new listing is saved as an inactive draft; the seller pays and then publishes from "Anunțurile mele".
+  - `run_platform_maintenance()` expires quotes, cancels unpaid live orders (restoring stock), closes subscriptions and unpublishes listings whose fee ran out. Schedule it with pg_cron (not installed) or run it from Admin.
+- **Three proformas** (`lib/checkout/proforma.ts`, a pure model rendered to PDF and HTML):
+  - **Seller copy:** seller → buyer, at seller prices, with seller VAT and IBAN.
+  - **Buyer copy:** what the buyer pays: goods at buyer prices (commission folded in), transport and VAT, plus a footer splitting the amount between issuers.
+  - **Middleman copy:** platform → buyer for the commission (and platform transport), plus settlement: collected, owed to the seller, kept by the platform.
+  - Access: the buyer sees the buyer copy, the seller the seller copy, admin all three.
+  - Old defects fixed:
+    - Helvetica had no ă/ș/ț; now DejaVu Sans.
+    - The fiscal address was never printed (it read `address_line1`; profiles store `line1`).
+    - There was no IBAN or CUI line, no VAT column, no series/number/due date.
+    - "TVA 19%" was hardcoded.
+    - Line totals were recomputed in the browser.
+  - Missing CUI, address or IBAN now shows a warning on screen instead of a silent blank.
+- **Sensitive data:**
+  - CUI is validated by the ANAF check digit, IBAN by mod-97, Reg. Com. in both the old and the post-2024 ONRC formats.
+  - Fiscal address is required for companies.
+  - IBAN and bank are new fields. They, CUI and phone are absent from public column grants and reach only order snapshots.
+  - Admin settings validate the platform's own CUI and IBAN.
+- **Optimization:**
+  - Soft delete keeps order history intact.
+  - Partial indexes for browse and seller lists; per-buyer idempotency only (the global unique key let two buyers collide).
+  - Pricing and commerce settings are cached for 60 s and invalidated with `updateTag`.
+  - Account tabs load in the existing parallel batch.
+  - Rate limits use Upstash Redis over REST when `UPSTASH_REDIS_REST_URL` / `TOKEN` are set, else memory.
+- **Multi-tenant request (`tenant_id` on every table):** not applied. Here the user is the tenant, and RLS on `auth.uid()` already isolates every table. A parallel `tenant_id` would duplicate that and add a column that could drift. The parts that do fit were applied: soft delete with partial unique indexes, and composite indexes on (owner, created_at).
+
+### Open (need the client or an operator)
+- **Q22.** Commission rate and base: 10% on goods only (DB default, configurable)? Should it also apply to transport (toggle exists)?
+- **Q23.** Legal model for collecting money (PSD2 / agent): see `dsaplatformat.docx`. The code supports platform collection with settlement, but this is a legal decision.
+- **Q24.** Payment provider choice (Netopia, Stripe, EuPlătesc, Revolut). Nothing is charged until one adapter is implemented.
+- **Q25.** Non-VAT-payer sellers: VAT is currently applied to all goods at the configured rate.
+- **Q26.** Plan prices and post fee amounts. No plans are seeded; create them in Admin.
+- **Operator to do:**
+  - Fill in the platform company data in Admin → Setări (the middleman proforma warns until then).
+  - Make one user admin via `set_user_role`; there is no admin today.
+  - Install pg_cron, or run maintenance manually.
+- **CSP:** `cdn.jsdelivr.net` was added to `connect-src` for the PDF font. Self-host the two TTFs in `/public/fonts` to remove it.
+
+## 3f. User panel: real data, real validation, onboarding (2026-11-20, fourth pass)
+
+### Found
+- **Seller activation:** one click with no checks. Clients could also set `seller_activated_at` directly through the API. **8 of 10 live listings belong to never-activated sellers.**
+- **Listings:** anyone could create one through the API; the only check was the UI gate.
+- **Orders tab:** purchases and sales were mixed and unbounded, with no order number or transport status. `paid` was shown as "Finalizată" (fulfilled).
+- **Seller dashboard:** auctions, offers and revenue were hardcoded 0. Payouts and payment methods were Stripe placeholder tabs; auctions was an empty mock tab.
+- **"Export date":** only logged a console message.
+- **Validation:**
+  - English Zod messages ("String must contain at least 6 character(s)").
+  - One banner error, never per field.
+  - Phone accepted any 6 characters; an empty phone was sent as `""` and failed validation.
+  - A password of 8 spaces passed.
+- **Login** ignored where the user came from.
+
+### Changed
+- **DB, applied on live and tested (rolled back):**
+  - Migrations: `20261120172848_seller_activation_requirements`, `..._fix_array_append`, `20261120172941_listings_require_seller_trigger_invoker`.
+  - `activate_seller()` requires name, valid phone, legal form, fiscal address and IBAN; companies also need a name and a valid CUI. SQL twins: `ro_cui_valid`, `ro_phone_valid`.
+  - Clients cannot set the seller flag directly.
+  - Only activated sellers can insert listings.
+  - Tests:
+    - `activate_seller()` rejected an incomplete profile, listing what was missing.
+    - Setting the flag directly was blocked.
+    - An unactivated user's listing insert was blocked; an activated seller's insert still worked.
+    - A completed profile activated.
+  - Two bugs caught by these tests are fixed: array append, and a SECURITY DEFINER trigger hiding the caller role.
+- **Validation:** a Romanian Zod error map, inline field errors on Profil and Date firmă, CUI / IBAN / Reg. Com. / phone check digits, empty fields saved as "not set", and a password strength rule. DB errors are mapped to readable messages instead of raw Postgres text.
+- **Activation:** the banner is now a checklist of missing items, each linking to the right tab. The button stays disabled until the profile is complete. `/sell/*` redirects to it, and login returns to the original page (same-site paths only).
+- **Orders tab:**
+  - Cumpărături / Vânzări tabs, latest 100.
+  - Order number, transport status and a "next step" hint per order (plătește, răspunde la ofertă, programează livrarea, confirmă livrarea).
+  - Sellers see their own amount.
+- **Seller dashboard:** real KPIs (orders 30d, to process, total sales, paid and to be settled). The auction stat and buttons are gone.
+- **Mock tabs:**
+  - Decontări (ex-Payouts) shows real sums and the IBAN on file.
+  - Plăți (ex-Metode plată) explains the real flow.
+  - The auctions tab is hidden; the auctions pages are untouched (S14).
+- **Export:** downloads the user's data as JSON immediately (RLS-scoped).
+- **Onboarding:** a "Primii pași" checklist at the top of the account, with progress from real data.
+- **Tutorial:** `/ghid`, in Romanian, 8 short sections (account, buying, checking an order, becoming a seller, posting, transport, payments/commission/documents, problems). Linked from the header, footer, account checklist, activation banner, orders tab and dashboard.
+
+### Still open
+- Existing sellers with incomplete data keep their activation (no retroactive lock). Run `select id, public.seller_missing_requirements(id) from profiles where seller_activated_at is not null` to see who must complete data. Q27: lock them until complete?
+- Addresses, policies and supplier settings forms still show a single banner error (now in Romanian), not per-field errors.
+- Reviews, threads and login_events RLS (S7–S9) are unchanged.
+
 ## 4. Prioritized fix plan
 
 Each step is one migration or one focused commit. Steps 1–6 need no client decision.

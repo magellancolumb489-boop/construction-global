@@ -15,7 +15,7 @@ const footerSections = [
     links: [
       { label: "Toate licitatiile", href: "/auctions" },
       { label: "Publica o licitatie", href: "/sell/auction/new" },
-      { label: "Cum functioneaza", href: "#" },
+      { label: "Cum functioneaza", href: "/ghid" },
     ],
   },
   {
@@ -29,7 +29,7 @@ const footerSections = [
   {
     title: "Suport",
     links: [
-      { label: "Centru de ajutor", href: "#" },
+      { label: "Ghid de utilizare", href: "/ghid" },
       { label: "Termeni si conditii", href: "#" },
       { label: "Confidentialitate", href: "#" },
     ],

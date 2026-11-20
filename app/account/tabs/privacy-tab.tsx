@@ -11,8 +11,9 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import {
-  requestDataExport, requestAccountDeletion, cancelAccountDeletion,
+  requestAccountDeletion, cancelAccountDeletion,
 } from "@/lib/api/security-client"
+import { exportMyDataAction } from "@/app/account/privacy/actions"
 import type { DeletionRequest } from "@/lib/api/privacy"
 
 interface PrivacyTabProps {
@@ -28,12 +29,20 @@ export function PrivacyTab({ deletionRequest }: PrivacyTabProps) {
   function doExport() {
     setMessage(null)
     startTransition(async () => {
-      const res = await requestDataExport()
+      const res = await exportMyDataAction()
       if (!res.success) {
         setMessage({ kind: "err", text: res.error })
         return
       }
-      setMessage({ kind: "ok", text: "Cererea a fost inregistrata. Veti primi link-ul pe email." })
+      // Download the JSON directly; nothing is emailed or stored server-side.
+      const blob = new Blob([res.json], { type: "application/json" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `constructionhub-date-${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      setMessage({ kind: "ok", text: "Exportul a fost descărcat." })
     })
   }
 

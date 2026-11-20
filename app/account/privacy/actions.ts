@@ -8,8 +8,49 @@ type ActionResult = { success: true } | { success: false; error: string }
 
 const DELETION_WINDOW_MS = 14 * 24 * 60 * 60 * 1000
 
-// GDPR-style data export: creates a flagged row so ops can pick it up.
-// Full export generation lands once the backoffice is wired.
+/**
+ * Immediate GDPR export (art. 20): every row the user can read under RLS,
+ * returned as JSON for a browser download. Nothing beyond the user's own data
+ * is reachable because the cookie client is RLS-scoped.
+ */
+export async function exportMyDataAction(): Promise<{ success: true; json: string } | { success: false; error: string }> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: "Nu esti autentificat." }
+
+  const [profile, addresses, listings, orders, reviews, threads, wishlist, prefs, subs, intents] = await Promise.all([
+    supabase.rpc("get_my_profile"),
+    supabase.from("user_addresses").select("*"),
+    supabase.from("marketplace_listings").select("*").eq("seller_id", user.id),
+    supabase.from("orders").select("*, order_lines(*), order_transport(*), order_transport_events(*)").limit(1000),
+    supabase.from("reviews").select("*").eq("reviewer_id", user.id),
+    supabase.from("message_threads").select("*, messages(*)"),
+    supabase.from("wishlist_items").select("*"),
+    supabase.from("user_notification_preferences").select("*"),
+    supabase.from("seller_subscriptions").select("*"),
+    supabase.from("payment_intents").select("*"),
+  ])
+
+  const payload = {
+    exported_at: new Date().toISOString(),
+    account: { id: user.id, email: user.email, created_at: user.created_at },
+    profile: profile.data?.[0] ?? null,
+    addresses: addresses.data ?? [],
+    listings: listings.data ?? [],
+    orders: orders.data ?? [],
+    reviews_written: reviews.data ?? [],
+    message_threads: threads.data ?? [],
+    wishlist: wishlist.data ?? [],
+    notification_preferences: prefs.data ?? [],
+    subscriptions: subs.data ?? [],
+    payments: intents.data ?? [],
+  }
+  return { success: true, json: JSON.stringify(payload, null, 2) }
+}
+
+// Legacy: kept for callers that only record the request.
 export async function requestDataExportAction(): Promise<ActionResult> {
   const supabase = await createClient()
   const {

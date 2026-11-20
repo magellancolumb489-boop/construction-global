@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import Image from "next/image"
-import { Package, ArrowRight } from "lucide-react"
+import { MapPin, ArrowRight } from "lucide-react"
 import { MoneyDisplay } from "./money-display"
 import { WishlistToggle } from "./wishlist-toggle"
 import type { ProductListItem } from "@/types/domain"
@@ -10,6 +10,8 @@ import type { ProductListItem } from "@/types/domain"
 export function ProductCard({ product }: { product: ProductListItem }) {
   const href = `/products/${product.slug}-${product.id}`
   const ctaLabel = product.listingKind === "concrete" ? "Configurare" : "Detalii"
+  // Client bug list: no stock quantity on marketplace cards. Show material + place instead.
+  const meta = [product.materialLabel, product.location].filter(Boolean).join(" · ")
 
   return (
     <Link href={href} className="group relative block">
@@ -39,10 +41,12 @@ export function ProductCard({ product }: { product: ProductListItem }) {
           <h3 className="mb-1.5 line-clamp-2 text-sm font-semibold leading-snug text-card-foreground group-hover:text-primary transition-colors">
             {product.name}
           </h3>
-          <div className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Package className="h-3 w-3" />
-            <span>{product.availableQty.toLocaleString("ro-RO")} {product.unit}</span>
-          </div>
+          {meta && (
+            <div className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <MapPin className="h-3 w-3 shrink-0" />
+              <span className="truncate">{meta}</span>
+            </div>
+          )}
           <div className="mb-3 flex items-baseline gap-1">
             <MoneyDisplay
               amount={product.price}

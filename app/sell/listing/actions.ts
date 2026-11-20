@@ -6,6 +6,7 @@ import {
   listingCreateSchema,
   listingUpdateSchema,
   concreteClassesRpcPayloadSchema,
+  materialListingIssue,
   materialLogisticsRpcPayloadSchema,
   type ListingCreateInput,
   type ListingUpdateInput,
@@ -69,6 +70,13 @@ function humanizeDbError(message: string | undefined | null): string {
   ) {
     return "Schema bazei de date este invechita. Ruleaza migratia recenta pe Supabase si reincearca."
   }
+  if (/listing fee required/i.test(msg)) {
+    return "Publicarea necesita plata taxei de anunt (sau un abonament). Anuntul ramane salvat ca inactiv."
+  }
+  if (/active listing limit reached/i.test(msg)) {
+    return "Ai atins numarul maxim de anunturi active din abonament. Dezactiveaza un anunt sau schimba planul."
+  }
+  if (/listing is deleted/i.test(msg)) return "Anuntul a fost sters si nu mai poate fi modificat."
   return msg || "Eroare necunoscuta la baza de date."
 }
 
@@ -86,11 +94,21 @@ export async function createListingAction(
     return { success: false, error: firstIssue(parsed.error.issues) }
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("marketplace_listings")
     .insert({ ...parsed.data, seller_id: user.id })
     .select()
     .single()
+
+  // Publication gate (pay-per-post / plan limit): keep the work as an inactive
+  // draft; the seller publishes it after paying from "Anunturile mele".
+  if (error && /listing fee required|active listing limit reached/i.test(error.message)) {
+    ;({ data, error } = await supabase
+      .from("marketplace_listings")
+      .insert({ ...parsed.data, is_active: false, seller_id: user.id })
+      .select()
+      .single())
+  }
 
   if (error) return { success: false, error: humanizeDbError(error.message) }
   revalidatePath("/account")
@@ -202,13 +220,16 @@ export async function upsertMaterialLogisticsAction(
 
   const { data: existing, error: fetchErr } = await supabase
     .from("marketplace_listings")
-    .select("seller_id, slug")
+    .select("seller_id, slug, unit")
     .eq("id", listingId)
     .maybeSingle()
   if (fetchErr || !existing) return { success: false, error: "Anunt inexistent." }
   if (existing.seller_id !== user.id) {
     return { success: false, error: "Nu esti proprietarul acestui anunt." }
   }
+  // Unit comes from the DB row, not the client, so the rule can't be bypassed.
+  const issue = materialListingIssue(existing.unit, parsed.data)
+  if (issue) return { success: false, error: issue }
 
   const { error } = await supabase.rpc("upsert_listing_material_logistics", {
     p_listing_id: listingId,
@@ -259,9 +280,11 @@ export async function deleteListingAction(id: number): Promise<ActionResult> {
     ...(folderFiles ?? []).map((f) => `${folder}/${f.name}`),
   ])
 
+  // Soft delete: the row stays for order history (order_lines keep listing_id),
+  // the slug is free again, and RLS hides it from everyone but the owner/admin.
   const { error } = await supabase
     .from("marketplace_listings")
-    .delete()
+    .update({ deleted_at: new Date().toISOString(), is_active: false })
     .eq("id", id)
 
   if (error) return { success: false, error: error.message }

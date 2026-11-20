@@ -8,6 +8,8 @@ import type { SellerDashboard } from "@/lib/api/seller"
 import type { LoginEvent } from "@/lib/api/security"
 import type { DeletionRequest } from "@/lib/api/privacy"
 import type { NotificationPrefs } from "@/lib/api/notification-prefs"
+import type { PlatformCommerce } from "@/lib/api/platform-settings"
+import type { MySubscription } from "@/lib/api/subscriptions"
 
 /** Seller auction row shape (shell tab; DB auctions stand-down — list stays empty). */
 export interface MyAuction {
@@ -41,6 +43,9 @@ export interface AccountData {
   loginEvents: LoginEvent[]
   deletionRequest: DeletionRequest | null
   notificationPrefs: NotificationPrefs | null
+  /** Post fees, plans and commission (platform_settings). */
+  commerce: PlatformCommerce
+  subscription: MySubscription | null
 }
 
 export type TabId =
@@ -57,6 +62,7 @@ export type TabId =
   | "payment-methods"
   | "seller-dashboard"
   | "listings"
+  | "subscription"
   | "auctions"
   | "seller-payouts"
   | "seller-shipping"

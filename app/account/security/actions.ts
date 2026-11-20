@@ -38,6 +38,10 @@ export async function changePasswordAction(newPassword: string): Promise<ActionR
   if (typeof newPassword !== "string" || newPassword.length < 8 || newPassword.length > 200) {
     return { success: false, error: "Parola trebuie sa aiba intre 8 si 200 de caractere." }
   }
+  // Minimal strength: at least one letter and one digit, no whitespace-only passwords.
+  if (!/[A-Za-zĂÂÎȘȚăâîșț]/.test(newPassword) || !/\d/.test(newPassword) || !newPassword.trim()) {
+    return { success: false, error: "Parola trebuie sa contina cel putin o litera si o cifra." }
+  }
   const { supabase, user } = await getUser()
   if (!user) return { success: false, error: "Nu esti autentificat." }
 

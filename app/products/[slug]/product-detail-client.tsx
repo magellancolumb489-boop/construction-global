@@ -100,8 +100,9 @@ function ProductPurchaseBlock({
       qty: q,
       availableQty: product.availableQty,
       thumbnailUrl: product.images[0] ?? "",
+      // Seller's flat fee only when the seller delivers; platform transport is quoted later.
       transportFee:
-        product.transportFee != null && product.transportFee > 0
+        product.sellerAssumesTransport && product.transportFee != null && product.transportFee > 0
           ? product.transportFee
           : undefined,
       configurationRequired: false,
@@ -146,6 +147,7 @@ function ProductPurchaseBlock({
           </div>
         )}
         {needsMaterialsConfigurator &&
+          product.sellerAssumesTransport &&
           product.transportFee != null &&
           product.transportFee > 0 && (
             <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
@@ -196,7 +198,13 @@ function ProductPurchaseBlock({
           </div>
         </div>
       )}
-      {product.transportFee != null && product.transportFee > 0 && (
+      {!product.sellerAssumesTransport && (
+        <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+          Transport organizat de platforma: costul nu este inclus in comanda si se confirma de
+          operator (orientativ min. 200 RON / cursa, 12 RON / km, distanta doar dus).
+        </p>
+      )}
+      {product.sellerAssumesTransport && product.transportFee != null && product.transportFee > 0 && (
         <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
           Transport fix adaugat o data la linie:{" "}
           <MoneyDisplay

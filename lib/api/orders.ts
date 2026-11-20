@@ -18,7 +18,9 @@ import type {
 // once here so the rest of the UI keeps the existing typings.
 function mapOrderStatus(raw: string): OrderStatus {
   switch (raw) {
+    // paid = confirmed, not yet delivered; fulfilled = delivered.
     case "paid":
+      return "CONFIRMED"
     case "fulfilled":
       return "FULFILLED"
     case "cancelled":
@@ -55,24 +57,37 @@ export async function getOrders(): Promise<OrderSummary[]> {
   if (!user) return []
 
   // RLS guarantees we only see orders where auth.uid() in (buyer_id, seller_id).
+  // Bounded (O1): the latest 100; older ones stay reachable from their links.
   const { data, error } = await supabase
     .from("orders")
     .select(
-      "id, order_number, created_at, status, payment_status, currency, total_cents, order_lines(id)",
+      "id, order_number, created_at, status, payment_status, currency, total_cents, buyer_id, seller_id, subtotal_cents, transport_cents, seller_vat_cents, vat_cents, order_lines(id), order_transport(status)",
     )
     .order("created_at", { ascending: false })
+    .limit(100)
 
   if (error || !data) return []
 
-  return data.map((row) => ({
-    id: row.id,
-    createdAt: row.created_at,
-    status: mapOrderStatus(row.status),
-    paymentStatus: mapPaymentStatus(row.payment_status),
-    total: centsToUnits(row.total_cents),
-    currency: (row.currency as Currency) ?? "RON",
-    itemCount: Array.isArray(row.order_lines) ? row.order_lines.length : 0,
-  }))
+  return data.map((row) => {
+    const role: "buyer" | "seller" = row.seller_id === user.id ? "seller" : "buyer"
+    const transportRaw = row.order_transport as unknown
+    const transport = (Array.isArray(transportRaw) ? transportRaw[0] : transportRaw) as { status: string } | null
+    const sellerShare =
+      Number(row.subtotal_cents) + Number(row.transport_cents) + Number(row.seller_vat_cents || row.vat_cents)
+    return {
+      id: row.id,
+      createdAt: row.created_at,
+      status: mapOrderStatus(row.status),
+      paymentStatus: mapPaymentStatus(row.payment_status),
+      total: centsToUnits(row.total_cents),
+      currency: (row.currency as Currency) ?? "RON",
+      itemCount: Array.isArray(row.order_lines) ? row.order_lines.length : 0,
+      orderNumber: row.order_number,
+      role,
+      transportStatus: transport?.status ?? null,
+      amountForViewer: centsToUnits(role === "seller" ? sellerShare : Number(row.total_cents)),
+    }
+  })
 }
 
 interface ShippingJsonShape {

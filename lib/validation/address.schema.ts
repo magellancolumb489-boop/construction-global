@@ -1,4 +1,6 @@
 import { z } from "zod"
+import "./errors"
+import { isValidRoPhone, normalizeRoPhone } from "./ro-fiscal"
 
 // Romanian postal format is 6 digits; allow empty string too so non-RO
 // addresses (label only) still pass basic validation.
@@ -10,9 +12,8 @@ const romanianPostalSchema = z
 const phoneSchema = z
   .string()
   .trim()
-  .min(6)
-  .max(32)
-  .regex(/^[+0-9\s().-]+$/, "Numar de telefon invalid")
+  .transform(normalizeRoPhone)
+  .refine(isValidRoPhone, "Număr invalid. Exemple: 0722 123 456 sau +40 722 123 456")
 
 // Upsert schema: used by createAddressAction + updateAddressAction. `id` is
 // injected by the server action; default flags flip atomically via RPC.

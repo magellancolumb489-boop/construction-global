@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, Gavel, ShoppingBag, Users, CreditCard, ArrowLeft } from "lucide-react"
+import { LayoutDashboard, Gavel, ShoppingBag, Users, CreditCard, ArrowLeft, Settings } from "lucide-react"
 
 const navItems = [
   { href: "/admin", label: "Prezentare Generala", icon: LayoutDashboard },
@@ -11,6 +11,7 @@ const navItems = [
   { href: "/admin/orders", label: "Comenzi", icon: ShoppingBag },
   { href: "/admin/users", label: "Utilizatori", icon: Users },
   { href: "/admin/payments", label: "Plati", icon: CreditCard },
+  { href: "/admin/settings", label: "Setari platforma", icon: Settings },
 ]
 
 export function AdminNav() {

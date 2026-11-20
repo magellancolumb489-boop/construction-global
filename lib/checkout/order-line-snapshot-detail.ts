@@ -25,7 +25,7 @@ function asFiniteNumber(v: unknown): number | null {
  * Second line under product title: concrete class/consistency, or materials transport plan
  * (+ taxonomy when snapshot includes category/material codes).
  */
-export function orderLineSnapshotSubline(
+function baseSubline(
   snap: Record<string, unknown> | null | undefined,
 ): string | null {
   if (!snap || typeof snap !== "object") return null
@@ -80,4 +80,23 @@ export function orderLineSnapshotSubline(
   if (klass || cons) return [klass, cons].filter(Boolean).join(" · ")
 
   return null
+}
+
+const TRANSPORT_STATUS_NOTES: Record<string, string> = {
+  platform_quote: "Transport organizat de platformă — cost confirmat separat",
+  manual_quote: "Transport în cisternă — ofertă manuală, neinclus",
+}
+
+/**
+ * Second line under product title, plus a transport note when the order did
+ * not include transport (place_order v3 `transport_status`).
+ */
+export function orderLineSnapshotSubline(
+  snap: Record<string, unknown> | null | undefined,
+): string | null {
+  const base = baseSubline(snap)
+  const status = snap && typeof snap["transport_status"] === "string" ? snap["transport_status"] : ""
+  const note = TRANSPORT_STATUS_NOTES[status]
+  if (!note) return base
+  return base ? `${base} · ${note}` : note
 }

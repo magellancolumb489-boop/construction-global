@@ -65,7 +65,7 @@ export function SellerPoliciesTab({ profile }: SellerPoliciesTabProps) {
 
   return (
     <div className="space-y-5">
-      {!isActive && <SellerActivationBanner hasBusinessProfile={hasBusiness} />}
+      {!isActive && <SellerActivationBanner hasBusinessProfile={hasBusiness} profile={profile} />}
 
       <div className="rounded-2xl border border-border/50 bg-card p-5 sm:p-6">
         <div className="mb-5 flex items-start gap-3">

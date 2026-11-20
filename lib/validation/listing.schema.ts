@@ -1,13 +1,23 @@
 import { z } from "zod"
+import "./errors"
 import { CONCRETE_CLASS_CATALOG } from "@/lib/listing-wizard-types"
 import {
+  isLongMaterial,
+  isUnitAllowedForMaterial,
   isValidMaterialPair,
   isValidPayload,
+  macaraAllowedFor,
   MATERIAL_CATEGORY_CODES,
+  MATERIAL_LABELS,
+  materialProfile,
+  requiresKgPerUnit,
+  requiresTanker,
   type MaterialCategoryCode,
   type VehicleCode,
   VEHICLE_CODES,
+  VEHICLE_LABELS,
 } from "@/lib/materials-logistics/catalog"
+import { eligibleSellerOffers } from "@/lib/materials-logistics/engine"
 
 // Units / currency accepted by marketplace_listings (must match DB CHECKs)
 export const listingUnitSchema = z.enum(["TON", "KG", "M3", "BUC", "ML", "CUP", "CAMION"])
@@ -118,6 +128,58 @@ export const materialLogisticsRpcPayloadSchema = z.object({
 })
 
 export type MaterialLogisticsRpcPayload = z.infer<typeof materialLogisticsRpcPayloadSchema>
+
+/**
+ * Cross-field rules between the listing unit and its materials spec. Runs in
+ * the wizard (before the listing is created) and again in the server action
+ * against the unit stored in the DB. Returns the first problem, or null.
+ */
+export function materialListingIssue(unit: string, payload: MaterialLogisticsRpcPayload): string | null {
+  const { spec, offers } = payload
+  const cat = spec.category_code
+  const mat = spec.material_code
+  const label = MATERIAL_LABELS[mat] ?? mat
+
+  if (!isUnitAllowedForMaterial(cat, mat, unit)) {
+    const allowed = materialProfile(cat, mat)?.units.join(", ") ?? "-"
+    return `${label} nu se vinde în unitatea ${unit}. Unități permise: ${allowed}.`
+  }
+  if (isLongMaterial(cat, mat) && !spec.max_piece_length_m) {
+    return `Pentru ${label} completați lungimea maximă a unei bucăți (m); decide vehiculul legal.`
+  }
+  if (requiresKgPerUnit(cat, mat, unit) && !spec.pallet_sac_kg) {
+    return `Completați greutatea per ${unit === "ML" ? "metru liniar" : "bucată"} (kg) pentru ${label}; fără ea nu se pot calcula cursele.`
+  }
+  if (spec.macara_addon && !macaraAllowedFor(cat, mat, unit)) {
+    return `Macaraua nu se poate oferi pentru ${label} (descărcare prin basculare sau cisternă).`
+  }
+  if (requiresTanker(cat, mat, unit)) {
+    if (offers.length > 0) {
+      return `${label} vrac se transportă în cisternă, care nu este în lista de vehicule. Lăsați vehiculele goale; transportul devine ofertă manuală.`
+    }
+    return null
+  }
+  const asRows = offers.map((o) => ({ vehicleCode: o.vehicle_code, payloadT: o.payload_t }))
+  const spec4engine = {
+    categoryCode: cat,
+    materialCode: mat,
+    maxPieceLengthM: spec.max_piece_length_m ?? null,
+    palletSacKg: spec.pallet_sac_kg ?? null,
+    palletPieces: spec.pallet_pieces ?? null,
+    palletTotalKg: spec.pallet_total_kg ?? null,
+    macaraAddon: spec.macara_addon,
+    macaraFee: spec.macara_fee,
+    allowNonBulkTransport: spec.allow_non_bulk_transport,
+  }
+  const eligible = eligibleSellerOffers(spec4engine, asRows, unit)
+  const rejected = asRows.find(
+    (r) => !eligible.some((e) => e.vehicleCode === r.vehicleCode && e.payloadT === r.payloadT),
+  )
+  if (rejected) {
+    return `${VEHICLE_LABELS[rejected.vehicleCode]} ${rejected.payloadT}t nu este permis pentru ${label} (tip material / lungime).`
+  }
+  return null
+}
 
 // Slug: URL-safe, 1-80 chars, lowercase, numbers, hyphens
 export const slugSchema = z

@@ -137,6 +137,7 @@ export const VEHICLE_CODES = [
   "DUBA",
   "AUTOUTILITARA",
   "CAMION_BENA",
+  "CAMION_PLATFORMA",
   "CAMION_HIAB",
   "TIR",
   "TRAILER",
@@ -149,17 +150,25 @@ export const VEHICLE_LABELS: Record<VehicleCode, string> = {
   DUBA: "Duba",
   AUTOUTILITARA: "Autoutilitara",
   CAMION_BENA: "Camion cu bena",
+  CAMION_PLATFORMA: "Camion cu platforma",
   CAMION_HIAB: "Camion cu macara (HIAB)",
   TIR: "Tir",
   TRAILER: "Trailer",
   AUTOBASCULANTA: "Autobasculanta",
 }
 
-/** Allowed payload (tonnes) per vehicle — seller selectable exactly these values. */
+/**
+ * Allowed payload (tonnes) per vehicle — seller selectable exactly these values.
+ * Payload = legal load, not gross vehicle weight. A van (duba, max 3.5 t MAM)
+ * carries at most ~1.5 t; 2 t and 3.5 t were MAM values and allowed illegal
+ * loads ("nu putem cara 2 tone de nisip cu o duba").
+ * SQL twin: public.materials_vehicle_payload_valid.
+ */
 export const PAYLOAD_OPTIONS_BY_VEHICLE: Record<VehicleCode, readonly number[]> = {
-  DUBA: [1, 1.5, 2, 3.5],
+  DUBA: [0.5, 1, 1.5],
   AUTOUTILITARA: [1, 1.5, 2, 3.5],
   CAMION_BENA: [7.5, 12, 18],
+  CAMION_PLATFORMA: [7.5, 12, 18],
   CAMION_HIAB: [7.5, 12, 18],
   TIR: [22, 23, 24],
   TRAILER: [24, 26, 28, 30],
@@ -236,8 +245,8 @@ export function isPalletTypical(_category: MaterialCategoryCode, materialCode: s
 /** Length bands (m) → vehicles allowed before weight filtering (Rule 4). */
 export function vehiclesForLongMaterial(maxPieceLengthM: number): VehicleCode[] {
   if (maxPieceLengthM < 2) return ["DUBA", "AUTOUTILITARA"]
-  if (maxPieceLengthM < 4) return ["AUTOUTILITARA", "CAMION_BENA"]
-  if (maxPieceLengthM <= 8) return ["CAMION_BENA", "CAMION_HIAB"]
+  if (maxPieceLengthM < 4) return ["AUTOUTILITARA", "CAMION_BENA", "CAMION_PLATFORMA"]
+  if (maxPieceLengthM <= 8) return ["CAMION_BENA", "CAMION_PLATFORMA", "CAMION_HIAB"]
   return ["TRAILER", "TIR"]
 }
 
@@ -261,8 +270,127 @@ export function defaultMarketplaceVehiclesForCategory(
     ]
   }
   return [
-    { vehicle: "DUBA", payloadT: 3.5 },
+    { vehicle: "DUBA", payloadT: 1.5 },
     { vehicle: "AUTOUTILITARA", payloadT: 3.5 },
-    { vehicle: "CAMION_BENA", payloadT: 12 },
+    { vehicle: "CAMION_PLATFORMA", payloadT: 12 },
+    { vehicle: "TIR", payloadT: 24 },
   ]
+}
+
+// ---------------------------------------------------------------------------
+// Material profiles: which units make sense, how heavy one unit is, and how
+// the material must travel. Mass drives the legal-load trip count, so a wrong
+// guess here produces an illegal (overloaded) or overpriced plan.
+// SQL twin: public.materials_estimate_mass_kg_v2 / public.materials_requires_tanker.
+// Values are orientation defaults; the seller's own kg/unit always wins.
+// ---------------------------------------------------------------------------
+
+export type ListingUnitCode = "TON" | "KG" | "M3" | "BUC" | "ML" | "CUP" | "CAMION"
+
+export interface MaterialProfile {
+  /** Units a seller may list this material in. */
+  units: readonly ListingUnitCode[]
+  /** Bulk density (kg/m3) for M3 / CUP listings. */
+  densityKgM3: number
+  /** Default kg per BUC / ML when the seller gives none. null = seller must give it. */
+  kgPerUnit: number | null
+}
+
+const AGG: MaterialProfile = { units: ["TON", "M3", "CUP", "CAMION"], densityKgM3: 1600, kgPerUnit: null }
+
+/** Keyed `${category}:${material}` — ciment and piatra_sparta_0_31 exist in two categories. */
+export const MATERIAL_PROFILES: Record<string, MaterialProfile> = {
+  // Alte materiale — bulk powders/binders travel in tankers; steel/timber are long.
+  "ALTE_MATERIALE:ciment": { units: ["TON", "KG", "BUC"], densityKgM3: 1400, kgPerUnit: 40 },
+  "ALTE_MATERIALE:bitum_rutier_50_70": { units: ["TON", "KG"], densityKgM3: 1030, kgPerUnit: null },
+  "ALTE_MATERIALE:filer": { units: ["TON", "KG", "BUC"], densityKgM3: 1300, kgPerUnit: 40 },
+  "ALTE_MATERIALE:plase_sudate": { units: ["BUC", "KG", "TON"], densityKgM3: 7850, kgPerUnit: null },
+  "ALTE_MATERIALE:bare_de_otel": { units: ["TON", "KG", "BUC", "ML"], densityKgM3: 7850, kgPerUnit: null },
+  "ALTE_MATERIALE:table": { units: ["BUC", "KG", "TON"], densityKgM3: 7850, kgPerUnit: null },
+  "ALTE_MATERIALE:etrieri": { units: ["BUC", "KG", "TON"], densityKgM3: 7850, kgPerUnit: null },
+  "ALTE_MATERIALE:cherestea": { units: ["M3", "ML", "BUC"], densityKgM3: 550, kgPerUnit: null },
+  // Agregate — always weight or volume, never pieces.
+  "AGREGATE_CARIERA:criblura_0_4": AGG,
+  "AGREGATE_CARIERA:criblura_4_8": AGG,
+  "AGREGATE_CARIERA:criblura_8_16": AGG,
+  "AGREGATE_CARIERA:criblura_16_31_5": AGG,
+  "AGREGATE_CARIERA:piatra_sparta_0_31": AGG,
+  "AGREGATE_CARIERA:piatra_sparta_0_63": AGG,
+  "AGREGATE_CARIERA:piatra_sparta_40_63": AGG,
+  "AGREGATE_CARIERA:piatra_sparta_90_250": AGG,
+  "AGREGATE_CARIERA:piatra_sparta_100_350": AGG,
+  "AGREGATE_CARIERA:piatra_sparta_0_600": AGG,
+  "AGREGATE_BALASTIERA:nisip_0_4": AGG,
+  "AGREGATE_BALASTIERA:sort_4_8": AGG,
+  "AGREGATE_BALASTIERA:sort_8_16": AGG,
+  "AGREGATE_BALASTIERA:sort_16_31_5": AGG,
+  "AGREGATE_BALASTIERA:piatra_sparta_0_31": AGG,
+  "AGREGATE_BALASTIERA:balast_0_63": { ...AGG, densityKgM3: 1900 },
+  // Dimensiuni medii — bags/pieces on pallets; kg/unit is the bag or piece.
+  "DIMENSIUNI_MEDII:adezivi": { units: ["BUC", "KG", "TON"], densityKgM3: 1400, kgPerUnit: 25 },
+  "DIMENSIUNI_MEDII:aditivi": { units: ["BUC", "KG"], densityKgM3: 1100, kgPerUnit: 25 },
+  "DIMENSIUNI_MEDII:ciment": { units: ["BUC", "KG", "TON"], densityKgM3: 1400, kgPerUnit: 40 },
+  "DIMENSIUNI_MEDII:var": { units: ["BUC", "KG", "TON"], densityKgM3: 600, kgPerUnit: 20 },
+  "DIMENSIUNI_MEDII:ipsos": { units: ["BUC", "KG", "TON"], densityKgM3: 1000, kgPerUnit: 25 },
+  "DIMENSIUNI_MEDII:glet": { units: ["BUC", "KG", "TON"], densityKgM3: 1000, kgPerUnit: 20 },
+  "DIMENSIUNI_MEDII:sapa": { units: ["BUC", "KG", "TON"], densityKgM3: 1500, kgPerUnit: 40 },
+  "DIMENSIUNI_MEDII:tencuiala": { units: ["BUC", "KG", "TON"], densityKgM3: 1400, kgPerUnit: 40 },
+  "DIMENSIUNI_MEDII:caramizi": { units: ["BUC", "M3"], densityKgM3: 1000, kgPerUnit: null },
+  "DIMENSIUNI_MEDII:tigla": { units: ["BUC", "M3"], densityKgM3: 1000, kgPerUnit: null },
+  "DIMENSIUNI_MEDII:bca": { units: ["BUC", "M3"], densityKgM3: 550, kgPerUnit: null },
+  "DIMENSIUNI_MEDII:hidroizolatie": { units: ["BUC", "KG"], densityKgM3: 1000, kgPerUnit: null },
+  "DIMENSIUNI_MEDII:rigips": { units: ["BUC"], densityKgM3: 800, kgPerUnit: null },
+  "DIMENSIUNI_MEDII:vata_minerala_sticla": { units: ["BUC", "M3"], densityKgM3: 20, kgPerUnit: null },
+  "DIMENSIUNI_MEDII:vata_minerala_bazaltica": { units: ["BUC", "M3"], densityKgM3: 100, kgPerUnit: null },
+  "DIMENSIUNI_MEDII:vata_ceramica": { units: ["BUC", "M3"], densityKgM3: 130, kgPerUnit: null },
+  // Dimensiuni mici — hardware sold by weight or piece.
+  "DIMENSIUNI_MICI:cuie": { units: ["KG", "BUC"], densityKgM3: 4000, kgPerUnit: null },
+  "DIMENSIUNI_MICI:sarma_dulgher": { units: ["KG", "BUC"], densityKgM3: 4000, kgPerUnit: null },
+  "DIMENSIUNI_MICI:suruburi": { units: ["KG", "BUC"], densityKgM3: 4000, kgPerUnit: null },
+  "DIMENSIUNI_MICI:piulite": { units: ["KG", "BUC"], densityKgM3: 4000, kgPerUnit: null },
+  "DIMENSIUNI_MICI:saibe": { units: ["KG", "BUC"], densityKgM3: 4000, kgPerUnit: null },
+  "DIMENSIUNI_MICI:garnituri": { units: ["KG", "BUC"], densityKgM3: 1000, kgPerUnit: null },
+  "DIMENSIUNI_MICI:scoabe": { units: ["KG", "BUC"], densityKgM3: 4000, kgPerUnit: null },
+  "DIMENSIUNI_MICI:distantieri": { units: ["KG", "BUC"], densityKgM3: 1000, kgPerUnit: null },
+}
+
+export function materialProfile(category: MaterialCategoryCode, materialCode: string): MaterialProfile | null {
+  return MATERIAL_PROFILES[`${category}:${materialCode}`] ?? null
+}
+
+export function isUnitAllowedForMaterial(
+  category: MaterialCategoryCode,
+  materialCode: string,
+  unit: string,
+): boolean {
+  const p = materialProfile(category, materialCode)
+  return !!p && (p.units as readonly string[]).includes(unit)
+}
+
+/** Seller must state kg per unit when the unit is a piece/length and no safe default exists. */
+export function requiresKgPerUnit(category: MaterialCategoryCode, materialCode: string, unit: string): boolean {
+  if (unit !== "BUC" && unit !== "ML") return false
+  return materialProfile(category, materialCode)?.kgPerUnit == null
+}
+
+const TANKER_MATERIALS = new Set<string>([
+  "ALTE_MATERIALE:ciment",
+  "ALTE_MATERIALE:filer",
+  "ALTE_MATERIALE:bitum_rutier_50_70",
+])
+
+/**
+ * Loose powders and hot bitumen travel only in tankers (cisterna / siloz),
+ * which are not in the platform's vehicle list. Bagged product (unit BUC)
+ * travels palletised. Tanker loads become a manual transport offer.
+ */
+export function requiresTanker(category: MaterialCategoryCode, materialCode: string, unit: string): boolean {
+  if (!TANKER_MATERIALS.has(`${category}:${materialCode}`)) return false
+  if (materialCode === "bitum_rutier_50_70") return true
+  return unit !== "BUC"
+}
+
+/** Crane unloading makes no sense for tipped bulk or tanker loads. */
+export function macaraAllowedFor(category: MaterialCategoryCode, materialCode: string, unit: string): boolean {
+  return !isBulkAggregateCategory(category) && !requiresTanker(category, materialCode, unit)
 }

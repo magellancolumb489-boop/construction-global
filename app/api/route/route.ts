@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
+import { rateLimit } from "@/lib/rate-limit"
 
 // Auth-only, rate-limited proxy to the OSRM public demo driving router.
 // Mirrors the hardening pattern of /api/geocode (auth + rolling-window).
@@ -9,7 +10,6 @@ import { createClient } from "@/lib/supabase/server"
 
 const RATE_LIMIT = 60 // requests
 const WINDOW_MS = 60_000 // per 60s rolling window
-const buckets = new Map<string, number[]>()
 
 // 24h in-process route cache (~11m key resolution)
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
@@ -20,25 +20,8 @@ interface CachedRoute {
 }
 const routeCache = new Map<string, CachedRoute>()
 
-// Rolling-window per-user rate-limiter. Per-instance only; swap to Upstash
-// once provisioned if stricter guarantees are needed.
-function isRateLimited(key: string): boolean {
-  const now = Date.now()
-  const prev = buckets.get(key) ?? []
-  const recent = prev.filter((t) => now - t < WINDOW_MS)
-  if (recent.length >= RATE_LIMIT) {
-    buckets.set(key, recent)
-    return true
-  }
-  recent.push(now)
-  buckets.set(key, recent)
-  if (buckets.size > 10_000) {
-    for (const [k, arr] of buckets) {
-      if (arr.every((t) => now - t >= WINDOW_MS)) buckets.delete(k)
-    }
-  }
-  return false
-}
+// Per-user rate limit: lib/rate-limit.ts (Upstash Redis when configured,
+// otherwise per-instance memory).
 
 // Round to ~11m precision so nearby requests collapse onto one cache entry.
 function roundCoord(n: number): string {
@@ -116,7 +99,8 @@ export async function POST(req: NextRequest) {
   }
 
   // 3. Rate-limit per user.
-  if (isRateLimited(user.id)) {
+  // Shared Redis window when Upstash is configured (lib/rate-limit.ts), else per-instance memory.
+  if (!(await rateLimit("route:" + user.id, RATE_LIMIT, WINDOW_MS / 1000)).allowed) {
     return NextResponse.json(
       { error: "Prea multe cereri. Reincercati in cateva secunde." },
       { status: 429 },

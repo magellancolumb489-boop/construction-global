@@ -4,6 +4,8 @@ import {
   toProductListItem,
   type Listing,
 } from "@/lib/api/listings"
+import { getPlatformPricing } from "@/lib/api/platform-settings"
+import type { PlatformPricing } from "@/lib/pricing/commission"
 
 export interface WishlistEntry {
   id: number
@@ -34,7 +36,8 @@ export async function getMyWishlist(): Promise<WishlistEntry[]> {
     return []
   }
 
-  return (data ?? []).map((row: unknown) => mapRow(row as WishlistRow))
+  const pricing = await getPlatformPricing()
+  return (data ?? []).map((row: unknown) => mapRow(row as WishlistRow, pricing))
 }
 
 interface WishlistRow {
@@ -49,7 +52,7 @@ interface WishlistRow {
     | null
 }
 
-function mapRow(row: WishlistRow): WishlistEntry {
+function mapRow(row: WishlistRow, pricing: PlatformPricing): WishlistEntry {
   const listing = row.marketplace_listings ?? null
   return {
     id: row.id,
@@ -60,6 +63,8 @@ function mapRow(row: WishlistRow): WishlistEntry {
           listing.categories?.name ?? "",
           [...(listing.marketplace_listing_images ?? [])]
             .sort((a, b) => a.display_order - b.display_order)[0]?.storage_path,
+          null,
+          pricing,
         )
       : null,
   }

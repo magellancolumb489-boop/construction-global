@@ -8,6 +8,8 @@ import { getMyWishlist } from "@/lib/api/wishlist"
 import { getReviewsGiven, getReviewsReceived } from "@/lib/api/reviews"
 import { getMyThreads } from "@/lib/api/messages"
 import { getSellerDashboard } from "@/lib/api/seller"
+import { getPlatformCommerce } from "@/lib/api/platform-settings"
+import { getMySubscription } from "@/lib/api/subscriptions"
 import { getRecentLoginEvents } from "@/lib/api/security"
 import { getMyDeletionRequest } from "@/lib/api/privacy"
 import { getMyNotificationPrefs } from "@/lib/api/notification-prefs"
@@ -37,6 +39,8 @@ export default async function AccountPage() {
     loginEvents,
     deletionRequest,
     notificationPrefs,
+    commerce,
+    subscription,
   ] = await Promise.all([
     getProfile(),
     getMyListings(),
@@ -49,6 +53,8 @@ export default async function AccountPage() {
     getRecentLoginEvents(20),
     getMyDeletionRequest(),
     getMyNotificationPrefs(),
+    getPlatformCommerce(),
+    getMySubscription(),
   ])
 
   return (
@@ -68,6 +74,8 @@ export default async function AccountPage() {
         loginEvents={loginEvents}
         deletionRequest={deletionRequest}
         notificationPrefs={notificationPrefs}
+        commerce={commerce}
+        subscription={subscription}
       />
     </Suspense>
   )

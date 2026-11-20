@@ -3,8 +3,9 @@ import type {
   ConcreteClassesRpcPayload,
   MaterialLogisticsRpcPayload,
 } from "@/lib/validation/listing.schema"
-import { materialLogisticsRpcPayloadSchema } from "@/lib/validation/listing.schema"
-import type { VehicleCode } from "@/lib/materials-logistics/catalog"
+import { materialListingIssue, materialLogisticsRpcPayloadSchema } from "@/lib/validation/listing.schema"
+import { macaraAllowedFor } from "@/lib/materials-logistics/catalog"
+import type { MaterialCategoryCode, VehicleCode } from "@/lib/materials-logistics/catalog"
 import type {
   ConcreteClassCode,
   ConcreteClassSelection,
@@ -280,7 +281,10 @@ export function buildMaterialLogisticsRpcPayload(
     pallet_pieces: optPositiveNumber(form.materialPalletPieces) ?? null,
     pallet_total_kg: optPositiveNumber(form.materialPalletTotalKg) ?? null,
     max_piece_length_m: optPositiveNumber(form.materialMaxPieceLengthM) ?? null,
-    macara_addon: form.materialMacaraAddon,
+    // The wizard hides the crane option where it can't apply; don't send a stale tick.
+    macara_addon:
+      form.materialMacaraAddon &&
+      macaraAllowedFor(form.materialCategoryCode as MaterialCategoryCode, form.materialCode, form.unit),
     macara_fee:
       form.materialMacaraFee.trim() === ""
         ? 0
@@ -305,5 +309,7 @@ export function buildMaterialLogisticsRpcPayload(
     const msg = parsed.error.issues[0]?.message ?? "Date materiale invalide."
     return { ok: false, error: msg }
   }
+  const issue = materialListingIssue(form.unit, parsed.data)
+  if (issue) return { ok: false, error: issue }
   return { ok: true, data: parsed.data }
 }

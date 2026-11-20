@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { FieldError } from "@/components/shared/field-error"
 import { updateMyProfileAction, uploadAvatarAction } from "@/app/account/actions"
 import { createClient } from "@/lib/supabase/client"
 import type { Profile } from "@/lib/api/profile-client"
@@ -30,6 +31,7 @@ export function ProfileTab({ userEmail, profile }: ProfileTabProps) {
   const [pending, startTransition] = useTransition()
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   const [form, setForm] = useState({
     displayName: profile?.display_name ?? "",
@@ -42,11 +44,13 @@ export function ProfileTab({ userEmail, profile }: ProfileTabProps) {
   function handleSave() {
     setMessage(null)
     startTransition(async () => {
+      // Empty inputs are "not set" (null), not invalid values.
       const res = await updateMyProfileAction({
-        display_name: form.displayName,
-        phone: form.phone,
+        display_name: form.displayName.trim() || null,
+        phone: form.phone.trim() || null,
         avatar_path: avatarPath,
       })
+      setFieldErrors(res.success ? {} : res.fieldErrors ?? {})
       if (!res.success) {
         setMessage({ kind: "err", text: res.error })
         return
@@ -162,6 +166,7 @@ export function ProfileTab({ userEmail, profile }: ProfileTabProps) {
                 placeholder="Nume complet sau denumire"
                 maxLength={80}
               />
+              <FieldError errors={fieldErrors} name="display_name" />
             </div>
             <div>
               <Label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -175,6 +180,7 @@ export function ProfileTab({ userEmail, profile }: ProfileTabProps) {
                 inputMode="tel"
                 autoComplete="tel"
               />
+              <FieldError errors={fieldErrors} name="phone" />
             </div>
           </div>
           <div>

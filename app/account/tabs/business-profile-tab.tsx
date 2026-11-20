@@ -1,5 +1,6 @@
 "use client"
 
+import { FieldError } from "@/components/shared/field-error"
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Building2, Save, Loader2, Globe, FileText } from "lucide-react"
@@ -40,6 +41,7 @@ export function BusinessProfileTab({ profile }: BusinessProfileTabProps) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   const initialFiscal = readFiscal(profile)
   const [form, setForm] = useState({
@@ -48,6 +50,8 @@ export function BusinessProfileTab({ profile }: BusinessProfileTabProps) {
     tax_id: profile?.tax_id ?? "",
     reg_com: profile?.reg_com ?? "",
     vat_id: profile?.vat_id ?? "",
+    iban: profile?.iban ?? "",
+    bank_name: profile?.bank_name ?? "",
     website_url: profile?.website_url ?? "",
     fiscal_line1: initialFiscal.line1 ?? "",
     fiscal_city: initialFiscal.city ?? "",
@@ -65,6 +69,8 @@ export function BusinessProfileTab({ profile }: BusinessProfileTabProps) {
         tax_id: form.tax_id || null,
         reg_com: form.reg_com || null,
         vat_id: form.vat_id || null,
+        iban: form.iban || null,
+        bank_name: form.bank_name || null,
         website_url: form.website_url || null,
         fiscal_address: {
           line1: form.fiscal_line1 || null,
@@ -74,6 +80,7 @@ export function BusinessProfileTab({ profile }: BusinessProfileTabProps) {
           country: "RO",
         },
       })
+      setFieldErrors(res.success ? {} : res.fieldErrors ?? {})
       if (!res.success) {
         setMessage({ kind: "err", text: res.error })
         return
@@ -95,7 +102,7 @@ export function BusinessProfileTab({ profile }: BusinessProfileTabProps) {
           <div>
             <h2 className="text-lg font-bold text-foreground">Date firma</h2>
             <p className="text-xs text-muted-foreground">
-              Obligatoriu pentru emiterea facturilor si activarea payouts dupa integrarea Stripe.
+              Necesare pentru a vinde: apar pe proformele comenzilor tale. CUI și IBAN sunt verificate automat.
             </p>
           </div>
         </div>
@@ -142,6 +149,7 @@ export function BusinessProfileTab({ profile }: BusinessProfileTabProps) {
                     placeholder="SC Exemplu SRL"
                     maxLength={200}
                   />
+                  <FieldError errors={fieldErrors} name="company_name" />
                 </div>
                 <div>
                   <Label className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -153,6 +161,7 @@ export function BusinessProfileTab({ profile }: BusinessProfileTabProps) {
                     className="h-11 rounded-xl font-mono"
                     placeholder="RO12345678"
                   />
+                  <FieldError errors={fieldErrors} name="tax_id" />
                 </div>
                 <div>
                   <Label className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -164,6 +173,7 @@ export function BusinessProfileTab({ profile }: BusinessProfileTabProps) {
                     className="h-11 rounded-xl font-mono"
                     placeholder="J12/3456/2020"
                   />
+                  <FieldError errors={fieldErrors} name="reg_com" />
                 </div>
                 <div>
                   <Label className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -176,7 +186,42 @@ export function BusinessProfileTab({ profile }: BusinessProfileTabProps) {
                     placeholder="RO12345678"
                     maxLength={20}
                   />
+                  <FieldError errors={fieldErrors} name="vat_id" />
                 </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Label className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    IBAN (apare pe proforme)
+                  </Label>
+                  <Input
+                    value={form.iban}
+                    onChange={(e) => setForm({ ...form, iban: e.target.value.toUpperCase() })}
+                    className="h-11 rounded-xl font-mono"
+                    placeholder="RO49 AAAA 1B31 0075 9384 0000"
+                    maxLength={40}
+                    autoComplete="off"
+                  />
+                  <FieldError errors={fieldErrors} name="iban" />
+                </div>
+                <div>
+                  <Label className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Banca
+                  </Label>
+                  <Input
+                    value={form.bank_name}
+                    onChange={(e) => setForm({ ...form, bank_name: e.target.value })}
+                    className="h-11 rounded-xl"
+                    placeholder="ex: Banca Transilvania"
+                    maxLength={120}
+                  />
+                  <FieldError errors={fieldErrors} name="bank_name" />
+                </div>
+                <p className="text-xs text-muted-foreground sm:col-span-2">
+                  CUI, Reg. Com., IBAN și adresa fiscală sunt vizibile doar pe proformele comenzilor tale,
+                  nu în profilul public.
+                </p>
               </div>
 
               <div className="rounded-2xl border border-dashed border-border/50 p-4">
@@ -190,6 +235,7 @@ export function BusinessProfileTab({ profile }: BusinessProfileTabProps) {
                     placeholder="Strada, numar, bloc"
                     className="h-11 rounded-xl sm:col-span-2"
                   />
+                  <FieldError errors={fieldErrors} name="fiscal_address" />
                   <Input
                     value={form.fiscal_city}
                     onChange={(e) => setForm({ ...form, fiscal_city: e.target.value })}
@@ -204,6 +250,7 @@ export function BusinessProfileTab({ profile }: BusinessProfileTabProps) {
                     inputMode="numeric"
                     maxLength={6}
                   />
+                  <FieldError errors={fieldErrors} name="fiscal_address.postal_code" />
                   <Input
                     value={form.fiscal_county}
                     onChange={(e) => setForm({ ...form, fiscal_county: e.target.value })}

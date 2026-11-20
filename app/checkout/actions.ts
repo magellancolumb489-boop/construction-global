@@ -2,11 +2,7 @@
 
 import { after } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { getPaymentsMode } from "@/lib/payments/mode"
-import {
-  createStripeCheckoutSession,
-  type OrderPayloadForStripe,
-} from "@/lib/payments/stripe-stub"
+import { startPaymentAction } from "@/app/payments/actions"
 import type { Json } from "@/types/supabase"
 import { getPlacedOrderById } from "@/lib/api/order-payload"
 import { sendOrderEmails } from "@/lib/email/send-order-emails"
@@ -60,7 +56,26 @@ export interface PlacedOrderLine {
   unit_price_cents: number
   transport_cents: number
   line_total_cents: number
+  commission_cents?: number
   snapshot_json: Record<string, unknown> | null
+}
+
+/** public.order_transport row embedded by _build_order_payload. */
+export interface OrderTransport {
+  order_id: string
+  mode: "seller" | "platform" | "tanker_manual"
+  status: string
+  quote_cents: number | null
+  quote_vat_cents: number | null
+  quote_note: string | null
+  quote_expires_at: string | null
+  paid: boolean
+  carrier_name: string | null
+  carrier_phone: string | null
+  scheduled_for: string | null
+  delivered_at: string | null
+  failure_reason: string | null
+  requote_count: number
 }
 
 export interface PlacedOrder {
@@ -74,6 +89,16 @@ export interface PlacedOrder {
   transport_cents: number
   vat_cents: number
   total_cents: number
+  /** v4: platform commission (buyer-facing markup) and VAT split by issuer. */
+  commission_rate?: number
+  commission_cents?: number
+  seller_vat_cents?: number
+  platform_vat_cents?: number
+  vat_rate?: number | null
+  platform_doc_number?: string | null
+  payment_due_at?: string | null
+  platform_snapshot?: Record<string, unknown> | null
+  transport?: OrderTransport | null
   status: string
   payment_status: string
   payment_provider: string
@@ -217,26 +242,18 @@ export async function placeOrderAction(
 
   const order = data as unknown as PlacedOrder
 
-  // Phase 2: branch on the payment provider. Stripe path stays unreachable in
-  // demo mode (the stub throws if invoked) but the seam is in place so the
-  // future switch is one env var.
-  if (getPaymentsMode() === "stripe") {
-    try {
-      const session = await createStripeCheckoutSession(order as unknown as OrderPayloadForStripe)
-      await supabase
-        .from("orders")
-        .update({
-          stripe_session_id: session.id,
-          payment_status: "pending",
-          payment_provider: "stripe",
-        })
-        .eq("id", order.id)
-      scheduleOrderConfirmationEmails(order)
-      return { success: true, order, redirectTo: session.url }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Eroare la inițializarea Stripe."
-      return { success: false, error: msg }
+  // Live payments (platform_settings.payments_mode = 'live'): the order is
+  // saved with payment_status = pending and stock reserved; the buyer pays via
+  // the provider checkout. The webhook marks it paid. If the provider fails,
+  // the order stays pending and can be paid from the order page; unpaid orders
+  // are cancelled (stock restored) by run_platform_maintenance after the TTL.
+  if (order.payment_status === "pending") {
+    const pay = await startPaymentAction("order", order.id)
+    scheduleOrderConfirmationEmails(order)
+    if (pay.ok && pay.kind === "redirect") {
+      return { success: true, order, redirectTo: pay.url }
     }
+    return { success: true, order }
   }
 
   scheduleOrderConfirmationEmails(order)

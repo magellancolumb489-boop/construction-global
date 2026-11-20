@@ -1,5 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
 import type { Tables } from "@/types/supabase"
+import { MATERIAL_LABELS } from "@/lib/materials-logistics/catalog"
+import { getPlatformPricing } from "@/lib/api/platform-settings"
+import { buyerPrice, type PlatformPricing } from "@/lib/pricing/commission"
 import {
   embedMaterialSpec,
   embedMaterialTransport,
@@ -42,6 +45,21 @@ export interface ListingsFilter {
   sort?: "price_asc" | "price_desc" | "newest" | "title"
   limit?: number
   offset?: number
+  /** listing_type in (...) — beton / materiale / utilaje / servicii */
+  listingTypes?: string[]
+  /** marketplace_listing_material_spec.category_code in (...) */
+  materialCategories?: string[]
+  /** marketplace_listing_material_spec.material_code in (...) */
+  materialCodes?: string[]
+  /** seller = seller delivers; platform = platform organises transport */
+  transport?: "seller" | "platform"
+  /** Free-text match on listing location (city / county). */
+  location?: string
+}
+
+/** Escape LIKE wildcards so user text matches literally. */
+function likeLiteral(text: string): string {
+  return text.replace(/[\\%_]/g, (m) => `\\${m}`)
 }
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -66,19 +84,28 @@ function listingKindFromRow(listing: Listing): ListingKind {
 export function toProductListItem(
   listing: Listing,
   categoryName?: string,
-  firstImagePath?: string
+  firstImagePath?: string,
+  materialLabel?: string | null,
+  pricing?: PlatformPricing,
 ): ProductListItem {
+  // Buyer-facing price includes the platform commission; seller price kept apart.
+  const rate = pricing?.commissionRate ?? 0
   return {
     id: String(listing.id),
     slug: listing.slug,
     name: listing.title,
-    price: listing.price,
+    price: buyerPrice(listing.price, rate),
+    sellerPrice: listing.price,
+    commissionRate: rate,
     unit: listing.unit as ProductUnit,
     currency: listing.currency as Currency,
     availableQty: listing.available_qty,
     thumbnailUrl: firstImagePath ? storagePublicUrl(firstImagePath) : PLACEHOLDER_IMG,
     category: categoryName ?? "",
     listingKind: listingKindFromRow(listing),
+    location: listing.location ?? null,
+    sellerAssumesTransport: listing.seller_assumes_transport ?? true,
+    materialLabel: materialLabel ?? null,
   }
 }
 
@@ -91,8 +118,11 @@ export function toProductDetail(
     phone: string | null
     company_name: string | null
     entity_type: string | null
-  } | null
+  } | null,
+  pricing?: PlatformPricing,
 ): ProductDetail {
+  const rate = pricing?.commissionRate ?? 0
+  const transportRate = pricing?.commissionOnTransport ? rate : 0
   const images = listing.marketplace_listing_images
     .sort((a, b) => a.display_order - b.display_order)
     .map((img) => storagePublicUrl(img.storage_path))
@@ -103,7 +133,13 @@ export function toProductDetail(
     kind === "concrete"
       ? concreteSelectionsFromRows(
           listing.marketplace_listing_concrete_classes ?? null,
-        )
+        ).map((c) => ({
+          ...c,
+          // Buyer sees concrete prices with the platform commission included.
+          consistencyPrices: Object.fromEntries(
+            Object.entries(c.consistencyPrices).map(([k, v]) => [k, String(buyerPrice(Number(v), rate))]),
+          ),
+        }))
       : []
 
   let materialLogistics: ProductMaterialLogistics | null = null
@@ -119,7 +155,7 @@ export function toProductDetail(
         palletPieces: ms.pallet_pieces,
         palletTotalKg: ms.pallet_total_kg,
         macaraAddon: ms.macara_addon,
-        macaraFee: ms.macara_fee,
+        macaraFee: ms.macara_fee == null ? null : buyerPrice(ms.macara_fee, transportRate),
         allowNonBulkTransport: ms.allow_non_bulk_transport,
         transportOffers: tr.map((r) => ({
           vehicleCode: r.vehicle_code,
@@ -130,7 +166,8 @@ export function toProductDetail(
   }
 
   return {
-    ...toProductListItem(listing, categoryName, listing.marketplace_listing_images[0]?.storage_path),
+    ...toProductListItem(listing, categoryName, listing.marketplace_listing_images[0]?.storage_path, null, pricing),
+    vatRate: pricing?.vatRate ?? 0.19,
     listingKind: kind,
     description: listing.description ?? "",
     images: images.length > 0 ? images : [PLACEHOLDER_IMG],
@@ -141,7 +178,8 @@ export function toProductDetail(
     sellerCompanyName: seller?.company_name?.trim() || null,
     sellerEntityType: seller?.entity_type?.trim() || null,
     sellerPhone: seller?.phone?.trim() || null,
-    transportFee: listing.transport_fee ?? null,
+    transportFee: listing.transport_fee == null ? null : buyerPrice(listing.transport_fee, transportRate),
+    sellerAssumesTransport: listing.seller_assumes_transport ?? true,
     minOrderQty: listing.min_order_qty ?? null,
     pickupLat: listing.pickup_lat ?? null,
     pickupLng: listing.pickup_lng ?? null,
@@ -173,8 +211,8 @@ export async function getListings(filters: ListingsFilter = {}): Promise<{
   if (filters.maxPrice !== undefined) {
     query = query.lte("price", filters.maxPrice)
   }
-  if (filters.search) {
-    query = query.ilike("title", `%${filters.search}%`)
+  if (filters.search?.trim()) {
+    query = query.ilike("title", `%${likeLiteral(filters.search.trim())}%`)
   }
 
   switch (filters.sort) {
@@ -231,11 +269,36 @@ export async function getProductListItems(filters: ListingsFilter = {}): Promise
 }> {
   const supabase = await createClient()
 
-  // Fetch listings with their first image and category name in one query
+  // Material filters need an inner join so non-matching listings drop out.
+  const filterByMaterial =
+    (filters.materialCategories?.length ?? 0) > 0 || (filters.materialCodes?.length ?? 0) > 0
+  const specEmbed = filterByMaterial
+    ? "marketplace_listing_material_spec!inner(category_code, material_code)"
+    : "marketplace_listing_material_spec(category_code, material_code)"
+
+  // Fetch listings with their first image, category name and material in one query
   let query = supabase
     .from("marketplace_listings")
-    .select("*, marketplace_listing_images(storage_path, display_order), categories(name)", { count: "exact" })
+    .select(`*, marketplace_listing_images(storage_path, display_order), categories(name), ${specEmbed}`, {
+      count: "exact",
+    })
     .eq("is_active", true)
+
+  if (filters.listingTypes?.length) {
+    query = query.in("listing_type", filters.listingTypes)
+  }
+  if (filters.materialCategories?.length) {
+    query = query.in("marketplace_listing_material_spec.category_code", filters.materialCategories)
+  }
+  if (filters.materialCodes?.length) {
+    query = query.in("marketplace_listing_material_spec.material_code", filters.materialCodes)
+  }
+  if (filters.transport) {
+    query = query.eq("seller_assumes_transport", filters.transport === "seller")
+  }
+  if (filters.location?.trim()) {
+    query = query.ilike("location", `%${likeLiteral(filters.location.trim())}%`)
+  }
 
   if (filters.categoryId) {
     query = query.eq("category_id", filters.categoryId)
@@ -249,8 +312,8 @@ export async function getProductListItems(filters: ListingsFilter = {}): Promise
   if (filters.maxPrice !== undefined) {
     query = query.lte("price", filters.maxPrice)
   }
-  if (filters.search) {
-    query = query.ilike("title", `%${filters.search}%`)
+  if (filters.search?.trim()) {
+    query = query.ilike("title", `%${likeLiteral(filters.search.trim())}%`)
   }
 
   switch (filters.sort) {
@@ -273,7 +336,7 @@ export async function getProductListItems(filters: ListingsFilter = {}): Promise
   const offset = filters.offset ?? 0
   query = query.range(offset, offset + limit - 1)
 
-  const { data, count, error } = await query
+  const [{ data, count, error }, pricing] = await Promise.all([query, getPlatformPricing()])
 
   if (error) {
     console.error("getProductListItems error:", error.message)
@@ -286,7 +349,14 @@ export async function getProductListItems(filters: ListingsFilter = {}): Promise
     const images = (row.marketplace_listing_images ?? []) as { storage_path: string; display_order: number }[]
     const sorted = images.sort((a, b) => a.display_order - b.display_order)
     const firstPath = sorted[0]?.storage_path
-    return toProductListItem(row as Listing, catName, firstPath)
+    // 1:1 embed may arrive as an object or a one-element array.
+    const specRaw = row.marketplace_listing_material_spec
+    const spec = (Array.isArray(specRaw) ? specRaw[0] : specRaw) as
+      | { category_code: string; material_code: string }
+      | null
+      | undefined
+    const materialLabel = spec ? (MATERIAL_LABELS[spec.material_code] ?? spec.material_code) : null
+    return toProductListItem(row as Listing, catName, firstPath, materialLabel, pricing)
   })
 
   return { items, total: count ?? 0 }
@@ -302,6 +372,8 @@ export async function getMyListings(): Promise<(Listing & { category_name: strin
     .from("marketplace_listings")
     .select("*, categories(name)")
     .eq("seller_id", user.id)
+    // Owners can read their soft-deleted rows (RLS); hide them here.
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
 
   if (error) {
@@ -428,5 +500,5 @@ export async function getProductDetailFromListing(slug: string): Promise<Product
     }
   }
 
-  return toProductDetail(row as ListingWithImages, catName, seller)
+  return toProductDetail(row as ListingWithImages, catName, seller, await getPlatformPricing())
 }

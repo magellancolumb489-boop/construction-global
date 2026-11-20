@@ -45,6 +45,10 @@ const cspDirectives = {
     "https://router.project-osrm.org",
     "https://va.vercel-scripts.com",
     "https://vitals.vercel-insights.com",
+    // Proforma PDF font (DejaVu Sans, covers ă â î ș ț). Fetched by
+    // @react-pdf/renderer in the browser. Drop this line if the TTF files are
+    // self-hosted under /public/fonts (see lib/checkout/pdf-fonts.ts).
+    "https://cdn.jsdelivr.net",
   ],
   "frame-ancestors": ["'none'"],
   "base-uri": ["'self'"],

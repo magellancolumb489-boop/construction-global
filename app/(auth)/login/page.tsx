@@ -25,7 +25,9 @@ export default function LoginPage() {
     try {
       const result = await login(email, password)
       if (result.success) {
-        router.push("/account")
+        // Return to the page that asked for login; only same-site paths (no "//host").
+        const next = new URLSearchParams(window.location.search).get("next")
+        router.push(next && next.startsWith("/") && !next.startsWith("//") ? next : "/account")
         router.refresh()
       } else {
         setError(result.error ?? "Eroare de autentificare.")
