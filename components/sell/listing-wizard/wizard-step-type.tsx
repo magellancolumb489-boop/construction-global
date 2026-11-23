@@ -2,6 +2,7 @@ import { Truck, Package, Wrench, Briefcase } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { ListingWizardType } from "@/lib/listing-wizard-types"
+import { COMPANY_ONLY_SUMMARY, isCompanyEntity, listingTypeAllowed } from "@/lib/listings/seller-eligibility"
 
 const OPTIONS: {
   id: ListingWizardType
@@ -39,22 +40,35 @@ const OPTIONS: {
 export function WizardStepType({
   value,
   onChange,
+  sellerEntityType,
 }: {
   value: ListingWizardType | null
   onChange: (t: ListingWizardType) => void
+  sellerEntityType?: string | null
 }) {
+  const isPf = !isCompanyEntity(sellerEntityType)
   return (
+    <div className="space-y-3">
+    {isPf && (
+      <p className="rounded-xl border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+        Vinzi ca persoană fizică. Unele produse ({COMPANY_ONLY_SUMMARY}) pot fi publicate doar de firme
+        (PFA, II, IF, SRL, SA). Le deblochezi schimbând forma juridică din „Date firmă”.
+      </p>
+    )}
     <div className="grid gap-3 sm:grid-cols-2">
       {OPTIONS.map((opt) => {
         const Icon = opt.icon
         const selected = value === opt.id
+        const blocked = !listingTypeAllowed(sellerEntityType, opt.id)
         return (
           <button
             key={opt.id}
             type="button"
+            disabled={blocked}
             onClick={() => onChange(opt.id)}
             className={cn(
               "min-h-[88px] rounded-xl border-2 p-4 text-left transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              blocked && "cursor-not-allowed opacity-50",
               selected
                 ? "border-primary bg-primary/5 shadow-sm"
                 : "border-border hover:border-primary/40 hover:bg-muted/40",
@@ -73,12 +87,14 @@ export function WizardStepType({
                 <div>
                   <p className="font-semibold text-foreground">{opt.title}</p>
                   <p className="mt-1 text-xs leading-snug text-muted-foreground">{opt.hint}</p>
+                  {blocked && <p className="mt-1 text-xs font-semibold text-amber-700">Doar pentru firme</p>}
                 </div>
               </CardContent>
             </Card>
           </button>
         )
       })}
+    </div>
     </div>
   )
 }

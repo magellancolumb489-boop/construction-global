@@ -78,6 +78,8 @@ interface ListingFormProps {
   existingImages?: ExistingImage[]
   /** Hydrates concrete class rows in edit mode (from `getListingForEdit` join). */
   existingConcreteClasses?: ListingConcreteClassRow[]
+  /** Seller legal form; PF cannot pick company-only products. */
+  sellerEntityType?: string | null
 }
 
 function slugify(text: string): string {
@@ -415,6 +417,7 @@ export function ListingForm({
   listing,
   existingImages = [],
   existingConcreteClasses,
+  sellerEntityType = null,
 }: ListingFormProps) {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -684,6 +687,7 @@ export function ListingForm({
           <WizardStepType
             value={form.listingType}
             onChange={requestListingType}
+            sellerEntityType={sellerEntityType}
           />
         </div>
       )}
@@ -700,6 +704,7 @@ export function ListingForm({
           form={form}
           setForm={setForm}
           categories={categories}
+          sellerEntityType={sellerEntityType}
         />
       )}
       {step === 2 && form.listingType === "equipment" && (

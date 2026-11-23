@@ -12,6 +12,7 @@ import {
   type ReadinessProfile,
   type SellerRequirement,
 } from "@/lib/account/seller-readiness"
+import { COMPANY_ONLY_SUMMARY } from "@/lib/listings/seller-eligibility"
 
 interface SellerActivationBannerProps {
   /** Kept for existing call sites; the checklist below is computed from `profile`. */
@@ -66,6 +67,10 @@ export function SellerActivationBanner({ profile, minimal = false }: SellerActiv
             Pentru a publica anunțuri și a primi comenzi, completează datele de mai jos. Ele apar pe proformele
             comenzilor tale (nu în profilul public).{" "}
             <Link href="/ghid#vanzator" className="underline">Cum funcționează?</Link>
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground sm:text-sm">
+            Poți vinde și ca <strong className="text-foreground">persoană fizică</strong> (fără CUI). Atenție: unele
+            produse ({COMPANY_ONLY_SUMMARY}) pot fi vândute doar de firme (PFA, II, IF, SRL, SA).
           </p>
           <ul className="mt-3 grid gap-1 text-xs sm:grid-cols-2">
             {shown.map((r) => {

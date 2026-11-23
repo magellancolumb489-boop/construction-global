@@ -1,5 +1,6 @@
 "use client"
 
+import { materialAllowed } from "@/lib/listings/seller-eligibility"
 import { useMemo } from "react"
 import { Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -65,6 +66,7 @@ interface Props {
   form: WizardFormState
   setForm: React.Dispatch<React.SetStateAction<WizardFormState>>
   categories: CategoryOption[]
+  sellerEntityType?: string | null
 }
 
 /** Construiește specificația pentru motorul de sugestii (preview în wizard). */
@@ -107,7 +109,7 @@ function offersFromRows(rows: MaterialTransportRowForm[]): TransportOfferRow[] {
 }
 
 /** Pasul 2 materiale: taxonomie RO, paleți, lungimi, transport multi-rând, macara. */
-export function WizardStepDetailsMaterials({ form, setForm, categories }: Props) {
+export function WizardStepDetailsMaterials({ form, setForm, categories, sellerEntityType }: Props) {
   const materialsInCategory = form.materialCategoryCode
     ? [...MATERIALS_BY_CATEGORY[form.materialCategoryCode as MaterialCategoryCode]]
     : []
@@ -348,11 +350,15 @@ export function WizardStepDetailsMaterials({ form, setForm, categories }: Props)
                 <SelectValue placeholder="Selecteaza materialul" />
               </SelectTrigger>
               <SelectContent>
-                {materialsInCategory.map((code) => (
-                  <SelectItem key={code} value={code}>
-                    {MATERIAL_LABELS[code] ?? code}
-                  </SelectItem>
-                ))}
+                {materialsInCategory.map((code) => {
+                  const blocked = !materialAllowed(sellerEntityType, code)
+                  return (
+                    <SelectItem key={code} value={code} disabled={blocked}>
+                      {MATERIAL_LABELS[code] ?? code}
+                      {blocked ? " (doar firme)" : ""}
+                    </SelectItem>
+                  )
+                })}
               </SelectContent>
             </Select>
           </div>

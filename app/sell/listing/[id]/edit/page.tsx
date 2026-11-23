@@ -2,6 +2,7 @@ import { notFound } from "next/navigation"
 import { getListingForEdit } from "@/lib/api/listings"
 import { getCategories } from "@/lib/api/categories"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
+import { getCurrentSellerEntityType } from "@/lib/listings/seller-eligibility.server"
 import { ListingForm } from "../../new/listing-form"
 
 export const metadata = {
@@ -19,9 +20,10 @@ export default async function EditListingPage({
 
   if (isNaN(id)) notFound()
 
-  const [listing, categories] = await Promise.all([
+  const [listing, categories, sellerEntityType] = await Promise.all([
     getListingForEdit(id),
     getCategories(),
+    getCurrentSellerEntityType(),
   ])
 
   // getListingForEdit returns null if not found or not owned by current user
@@ -40,6 +42,7 @@ export default async function EditListingPage({
       <ListingForm
         categories={categories.map((c) => ({ id: c.id, name: c.name }))}
         editMode
+        sellerEntityType={sellerEntityType}
         listing={listing}
         existingConcreteClasses={listing.marketplace_listing_concrete_classes ?? []}
         existingImages={listing.marketplace_listing_images.map((img) => ({

@@ -9,9 +9,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { updateBusinessProfileAction } from "@/app/account/actions"
 import type { Profile } from "@/lib/api/profile-client"
+import { COMPANY_ONLY_SUMMARY } from "@/lib/listings/seller-eligibility"
 
 const ENTITIES: { id: string; label: string; hint: string }[] = [
-  { id: "PF", label: "Persoana fizica", hint: "Fara CIF, nu emiti facturi fiscale" },
+  { id: "PF", label: "Persoana fizica", hint: "Fara CIF; unele produse sunt doar pentru firme" },
   { id: "PFA", label: "PFA", hint: "Persoana fizica autorizata" },
   { id: "SRL", label: "SRL", hint: "Societate cu raspundere limitata" },
   { id: "SA", label: "SA", hint: "Societate pe actiuni" },
@@ -134,6 +135,13 @@ export function BusinessProfileTab({ profile }: BusinessProfileTabProps) {
               })}
             </div>
           </div>
+
+          {form.entity_type === "PF" && (
+            <p className="rounded-xl border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              Ca persoană fizică poți vinde pe platformă, dar unele produse ({COMPANY_ONLY_SUMMARY}) sunt disponibile
+              doar pentru firme (PFA, II, IF, SRL, SA).
+            </p>
+          )}
 
           {requiresFiscal && (
             <>

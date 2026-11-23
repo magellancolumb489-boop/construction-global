@@ -1,6 +1,7 @@
 "use server"
 
 import { checkPrice, listingCoreIssues, priceMessage, priceRange, type ListingCore } from "@/lib/listings/rules"
+import { COMPANY_ONLY_MESSAGE, listingTypeAllowed, materialAllowed } from "@/lib/listings/seller-eligibility"
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import {
@@ -77,8 +78,19 @@ function humanizeDbError(message: string | undefined | null): string {
   if (/active listing limit reached/i.test(msg)) {
     return "Ai atins numarul maxim de anunturi active din abonament. Dezactiveaza un anunt sau schimba planul."
   }
+  if (/company only listing/i.test(msg)) {
+    return "Acest produs poate fi vandut doar de firme (PFA, II, IF, SRL, SA)."
+  }
   if (/listing is deleted/i.test(msg)) return "Anuntul a fost sters si nu mai poate fi modificat."
   return msg || "Eroare necunoscuta la baza de date."
+}
+
+type Supa = Awaited<ReturnType<typeof createClient>>
+
+/** Seller legal form; PF sellers cannot publish company-only products. */
+async function sellerEntityType(supabase: Supa, userId: string): Promise<string | null> {
+  const { data } = await supabase.from("profiles").select("entity_type").eq("id", userId).maybeSingle()
+  return (data?.entity_type as string | null | undefined) ?? null
 }
 
 /** Map a listing row (or row + changes) to the shared content rules input. */
@@ -115,6 +127,9 @@ export async function createListingAction(
   }
   const ruleIssue = listingCoreIssues(toCore(parsed.data))[0]
   if (ruleIssue) return { success: false, error: ruleIssue.message }
+  if (!listingTypeAllowed(await sellerEntityType(supabase, user.id), toCore(parsed.data).listing_type)) {
+    return { success: false, error: COMPANY_ONLY_MESSAGE }
+  }
 
   let { data, error } = await supabase
     .from("marketplace_listings")
@@ -172,8 +187,12 @@ export async function updateListingAction(
   // cannot slip past them. Turning a listing off is always allowed.
   const onlyDeactivating = Object.keys(parsed.data).length === 1 && parsed.data.is_active === false
   if (!onlyDeactivating) {
-    const ruleIssue = listingCoreIssues(toCore({ ...existing, ...parsed.data }))[0]
+    const after = toCore({ ...existing, ...parsed.data })
+    const ruleIssue = listingCoreIssues(after)[0]
     if (ruleIssue) return { success: false, error: ruleIssue.message }
+    if (!listingTypeAllowed(await sellerEntityType(supabase, user.id), after.listing_type)) {
+      return { success: false, error: COMPANY_ONLY_MESSAGE }
+    }
   }
 
   const { error } = await supabase
@@ -269,6 +288,9 @@ export async function upsertMaterialLogisticsAction(
   // Unit comes from the DB row, not the client, so the rule can't be bypassed.
   const issue = materialListingIssue(existing.unit, parsed.data)
   if (issue) return { success: false, error: issue }
+  if (!materialAllowed(await sellerEntityType(supabase, user.id), parsed.data.spec.material_code)) {
+    return { success: false, error: COMPANY_ONLY_MESSAGE }
+  }
   const priceCheck = checkPrice(
     Number(existing.price),
     priceRange("materials", existing.unit, parsed.data.spec.category_code, parsed.data.spec.material_code),

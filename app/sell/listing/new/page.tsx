@@ -1,5 +1,6 @@
 import { getCategories } from "@/lib/api/categories"
 import { Breadcrumbs } from "@/components/layout/breadcrumbs"
+import { getCurrentSellerEntityType } from "@/lib/listings/seller-eligibility.server"
 import { ListingForm } from "./listing-form"
 
 export const metadata = {
@@ -8,7 +9,7 @@ export const metadata = {
 
 // Server component -- auth guard is handled by app/sell/layout.tsx
 export default async function NewListingPage() {
-  const categories = await getCategories()
+  const [categories, sellerEntityType] = await Promise.all([getCategories(), getCurrentSellerEntityType()])
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
@@ -21,6 +22,7 @@ export default async function NewListingPage() {
       </div>
       <ListingForm
         categories={categories.map((c) => ({ id: c.id, name: c.name }))}
+        sellerEntityType={sellerEntityType}
       />
     </div>
   )
